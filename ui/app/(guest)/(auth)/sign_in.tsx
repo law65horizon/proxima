@@ -127,7 +127,7 @@ export default function SignInScreen() {
           },
         });
 
-        console.log(data?.verifyCode)
+        console.log({userm: data?.verifyCode.user})
   
         await setAuth(
           data.verifyCode.accessToken,

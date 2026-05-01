@@ -41,6 +41,7 @@ const MessagesScreen = ({ navigation }: any) => {
         searchQuery: searchQuery || undefined,
       },
     },
+    skip: !user,
     fetchPolicy: 'cache-and-network',
     // pollInterval: 30000,
   });

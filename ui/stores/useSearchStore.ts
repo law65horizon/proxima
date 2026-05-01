@@ -18,38 +18,28 @@ interface SearchFilters {
   features: string[];
 }
 
-// interface RecentSearch {
-//   query: string;
-//   timestamp: number;
-//   filters: SearchFilters;
-// }
-
 interface RecentSearch {
   tag: string;
   timestamp: number;
-  postal_code?: number,
+  postal_code?: string | number;
   city?: string;
-  latitude?: number,
-  longitude?: number
+  latitude?: number;
+  longitude?: number;
 }
 
 interface SearchStore {
-  // Current search state
   query: string;
   filters: SearchFilters;
   listingType: ListingType;
-  
-  // Recent searches (persist)
   recentSearches: RecentSearch[];
-  
-  // Actions
+
   setQuery: (query: string) => void;
   setFilters: (filters: Partial<SearchFilters>) => void;
   setListingType: (type: ListingType) => void;
   clearFilters: () => void;
   saveSearch: () => void;
   getActiveFilterCount: () => number;
-  addToRecents: (recent: RecentSearch) => void
+  addToRecents: (recent: RecentSearch) => void;
 }
 
 const initialFilters: SearchFilters = {
@@ -84,27 +74,25 @@ export const useSearchStore = create<SearchStore>()(
       clearFilters: () => set({ filters: initialFilters }),
 
       saveSearch: () => {
-        const { query, filters, recentSearches } = get();
+        const { query, recentSearches } = get();
         if (!query.trim()) return;
-
-        const newSearch: RecentSearch = {
-          tag: query,
-          timestamp: Date.now(),
-        };
-
+        const newSearch: RecentSearch = { tag: query, timestamp: Date.now() };
         set({
           recentSearches: [
             newSearch,
             ...recentSearches.filter((s) => s.tag !== query),
-          ].slice(0, 20), // Keep last 10
+          ].slice(0, 20),
         });
       },
 
       addToRecents: (recent: RecentSearch) => {
-        const {recentSearches} = get()
+        const { recentSearches } = get();
         set({
-          recentSearches: [recent, ...recentSearches.filter((s) => s.tag !== recent.tag)].slice(0, 20)
-        })
+          recentSearches: [
+            recent,
+            ...recentSearches.filter((s) => s.tag !== recent.tag),
+          ].slice(0, 20),
+        });
       },
 
       getActiveFilterCount: () => {
@@ -127,6 +115,6 @@ export const useSearchStore = create<SearchStore>()(
         recentSearches: state.recentSearches,
         listingType: state.listingType,
       }),
-    }
-  )
+    },
+  ),
 );

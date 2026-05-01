@@ -22,8 +22,8 @@ import {
 const { width } = Dimensions.get('window');
 
 const GET_HOST_PROPERTIES = gql`
-query MyProperties($realtorId: ID!) {
-  myProperties(realtor_id: $realtorId) {
+query MyProperties {
+  myProperties {
     id
     title
     property_type
@@ -65,189 +65,6 @@ const DELETE_PROPERTY = gql`
   }
 `;
 
-const GET_HOST_PROPERTIES_MOCK = {
-  data: {
-    myProperties: [
-      {
-        id: "prop_001",
-        title: "Modern Downtown Apartment",
-        property_type: "APARTMENT",
-        sale_status: "FOR_RENT",
-        price: 1200,
-        status: "ACTIVE",
-        address: {
-          id: "addr_001",
-          street: "123 Main Street",
-          city: "Berlin",
-          postal_code: "10115",
-          country: "Germany",
-        },
-        amenities: ["WiFi", "Air Conditioning", "Elevator"],
-        created_at: "2025-01-05T10:15:30Z",
-        updated_at: "2025-01-20T08:45:10Z",
-        images: [
-          {
-            id: "img_001",
-            cdn_url: "https://res.cloudinary.com/dajzo2zpq/image/upload/v1752247182/properties/wlf2uijbultztvqptnka.jpg",
-            is_primary: true,
-          },
-          {
-            id: "img_002",
-            cdn_url: "https://res.cloudinary.com/dajzo2zpq/image/upload/v1752247182/properties/wlf2uijbultztvqptnka.jpg",
-            is_primary: false,
-          },
-        ],
-        room_types: [
-          {
-            id: "room_001",
-            name: "Entire Apartment",
-            base_price: 1200,
-            capacity: 2,
-          },
-        ],
-      },
-      {
-        id: "prop_002",
-        title: "Cozy Suburban House",
-        property_type: "HOUSE",
-        sale_status: "FOR_SALE",
-        price: 320000,
-        status: "ACTIVE",
-        address: {
-          id: "addr_002",
-          street: "45 Oak Avenue",
-          city: "Munich",
-          postal_code: "80331",
-          country: "Germany",
-        },
-        amenities: ["Garden", "Garage", "Fireplace"],
-        created_at: "2024-12-10T14:22:11Z",
-        updated_at: "2025-01-18T12:10:05Z",
-        images: [
-          {
-            id: "img_003",
-            cdn_url: "https://res.cloudinary.com/dajzo2zpq/image/upload/v1752247182/properties/wlf2uijbultztvqptnka.jpg",
-            is_primary: true,
-          },
-        ],
-        room_types: [
-          {
-            id: "room_002",
-            name: "Master Bedroom",
-            base_price: 800,
-            capacity: 2,
-          },
-          {
-            id: "room_003",
-            name: "Guest Bedroom",
-            base_price: 600,
-            capacity: 2,
-          },
-        ],
-      },
-      {
-        id: "prop_003",
-        title: "Luxury Beachfront Villa",
-        property_type: "VILLA",
-        sale_status: "FOR_RENT",
-        price: 4500,
-        status: "ACTIVE",
-        address: {
-          id: "addr_003",
-          street: "9 Ocean Drive",
-          city: "Nice",
-          postal_code: "06000",
-          country: "France",
-        },
-        amenities: ["Pool", "Ocean View", "Private Parking", "WiFi"],
-        created_at: "2024-11-01T09:00:00Z",
-        updated_at: "2025-01-25T16:40:22Z",
-        images: [
-          {
-            id: "img_004",
-            cdn_url: "https://res.cloudinary.com/dajzo2zpq/image/upload/v1752247182/properties/wlf2uijbultztvqptnka.jpg",
-            is_primary: true,
-          },
-        ],
-        room_types: [
-          {
-            id: "room_004",
-            name: "Villa Suite",
-            base_price: 4500,
-            capacity: 6,
-          },
-        ],
-      },
-      {
-        id: "prop_004",
-        title: "Minimalist Studio",
-        property_type: "STUDIO",
-        sale_status: "FOR_RENT",
-        price: 700,
-        status: "INACTIVE",
-        address: {
-          id: "addr_004",
-          street: "78 King Street",
-          city: "Amsterdam",
-          postal_code: "1012AB",
-          country: "Netherlands",
-        },
-        amenities: ["WiFi", "Kitchenette"],
-        created_at: "2024-10-15T11:35:50Z",
-        updated_at: "2025-01-10T09:05:00Z",
-        images: [
-          {
-            id: "img_005",
-            cdn_url: "https://res.cloudinary.com/dajzo2zpq/image/upload/v1752247182/properties/wlf2uijbultztvqptnka.jpg",
-            is_primary: true,
-          },
-        ],
-        room_types: [
-          {
-            id: "room_005",
-            name: "Studio Space",
-            base_price: 700,
-            capacity: 1,
-          },
-        ],
-      },
-      {
-        id: "prop_005",
-        title: "Rustic Mountain Cabin",
-        property_type: "CABIN",
-        sale_status: "FOR_RENT",
-        price: 950,
-        status: "ACTIVE",
-        address: {
-          id: "addr_005",
-          street: "Forest Road 12",
-          city: "Innsbruck",
-          postal_code: "6020",
-          country: "Austria",
-        },
-        amenities: ["Fireplace", "Mountain View", "Parking"],
-        created_at: "2024-09-01T07:20:10Z",
-        updated_at: "2025-01-22T18:30:45Z",
-        images: [
-          {
-            id: "img_006",
-            cdn_url: "https://res.cloudinary.com/dajzo2zpq/image/upload/v1752247182/properties/wlf2uijbultztvqptnka.jpg",
-            is_primary: true,
-          },
-        ],
-        room_types: [
-          {
-            id: "room_006",
-            name: "Entire Cabin",
-            base_price: 950,
-            capacity: 4,
-          },
-        ],
-      },
-    ],
-  },
-};
-
 
 type PropertyStatus = 'all' | 'published' | 'draft' | 'pending_review' | 'archived';
 type PropertyType = 'all' | 'apartment' | 'house' | 'hotel';
@@ -266,7 +83,7 @@ const HostProperties = () => {
   const { data, loading, error, refetch, networkStatus } = useQuery(
     GET_HOST_PROPERTIES, 
     {
-      variables: {realtorId: user?.id || 3},
+      // variables: {realtorId: user?.id || 3},
       fetchPolicy: 'cache-and-network'
     },
     

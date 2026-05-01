@@ -25,5 +25,6 @@ export const saveTokensToSecureStore = async (
   await SecureStore.setItemAsync('refreshToken', refreshToken);
   await SecureStore.setItemAsync('user', JSON.stringify(user));
   await SecureStore.setItemAsync('sessionId', sessionId);
-  await SecureStore.setItemAsync('mode', mode);
+  {mode && await SecureStore.setItemAsync('mode', mode);}
+  // useAuthStore.setState({accessToken, user, refreshToken, sessionId})
 };

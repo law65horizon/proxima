@@ -5,7 +5,7 @@ import { useTheme } from '@/theme/theme';
 import { gql, useQuery } from '@apollo/client';
 import { Ionicons } from '@expo/vector-icons';
 import { MaterialTopTabBarProps, createMaterialTopTabNavigator } from '@react-navigation/material-top-tabs';
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   StyleSheet,
   Text,
@@ -15,6 +15,7 @@ import {
 
 // Import tab screens
 import { useBookingFilter } from '@/stores/bookingStore';
+import { useIsFocused } from '@react-navigation/native';
 import ActiveTabScreen from './ActiveTab';
 import AllTabScreen from './All';
 import UpcomingTabScreen from './UpcomingTab';
@@ -120,14 +121,14 @@ const GET_BOOKINGS_SUMMARY = gql`
   }
 `;
 
-const GET_HOST_PROPERTIES = gql`
-  query GetHostProperties {
-    myProperties {
-      id
-      title
-    }
-  }
-`;
+// const GET_HOST_PROPERTIES = gql`
+//   query GetHostProperties {
+//     myProperties {
+//       id
+//       title
+//     }
+//   }
+// `;
 
 const mock = {
   "data": {
@@ -168,13 +169,20 @@ export default function BookingsDashboardScreen() {
     priceRange: { min: 0, max: 10000 },
     guestType: 'all',
   });
+  const isFocused = useIsFocused()
 
-  const { data: summary, loading, refetch } = useQuery(GET_BOOKINGS_SUMMARY, {
-    pollInterval: 30000, // Refresh every 30 seconds
+  const { data: summary, startPolling, stopPolling} = useQuery(GET_BOOKINGS_SUMMARY, {
+    fetchPolicy: 'network-only',
+    notifyOnNetworkStatusChange: true
   });
 
-  const { data: propertiesData } = useQuery(GET_HOST_PROPERTIES);
-
+  useEffect(() => {
+    if (isFocused) {
+      startPolling(30000)
+    } else {
+      stopPolling
+    }
+  }, [isFocused])
   const stats = summary?.myBookingsSummary;
   // const stats = mock.data?.getHostBookings;
   const properties = mockProperties.data?.myProperties || [];

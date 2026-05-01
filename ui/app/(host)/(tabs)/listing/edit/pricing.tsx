@@ -38,7 +38,7 @@ export default function CreatePropertyStep3() {
       if (price !== pricing) setField('pricing', price)
 
       router.push({
-        pathname: '/(host)/(tabs)/listing/edit/crep4',
+        pathname: '/(host)/(tabs)/listing/edit/review',
       });
     }
   };

@@ -65,7 +65,7 @@ export default function TripsDashboard({ navigation }: any) {
 //   const bookings = useBookingsStore((state) => state.bookings);
   const [activeTab, setActiveTab] = useState<'current' | 'upcoming' | 'past'>('current');
   const [openDropDown, setOpenDropDown] = useState(false)
-  const {data, error, loading, refetch} = useQuery(GET_MY_BOOKINGS)
+  const {data, error, loading, refetch} = useQuery(GET_MY_BOOKINGS, {skip: !user})
   const [isRefetching, setIsRefetching] = useState(false)
   const bookings: any[] = data?.myBookings || []
   // console.log(data?.myBookings[0].property.images)
@@ -94,12 +94,16 @@ export default function TripsDashboard({ navigation }: any) {
   }, [bookings]);
 
   useEffect(() => {
-  const fetchData = async () => {
-    await refetch();
-  };
+    const fetchData = async () => {
+      try {
+        await refetch();
+      } catch (error) {
+        
+      }
+    };
 
-  fetchData();
-}, [user]);
+    fetchData();
+  }, [user]);
 
 
   const activeBookings = categorizedBookings[activeTab];
@@ -291,6 +295,9 @@ export default function TripsDashboard({ navigation }: any) {
       <ActivityIndicator size={'large'} color={theme.colors.text} />
     </View>
   )
+  if (error) {
+    // unhandled
+  }
 
   if (!user) return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>

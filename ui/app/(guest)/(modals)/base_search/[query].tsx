@@ -6,11 +6,10 @@ import { useTheme } from '@/theme/theme';
 import { gql, useLazyQuery, useMutation } from '@apollo/client';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useRef, useState } from 'react';
+import { useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Dimensions,
   FlatList,
   Keyboard,
   Platform,
@@ -18,23 +17,26 @@ import {
   StyleSheet,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 
-const { width } = Dimensions.get('screen');
+type QuickSearchResult = {
+  id: number | string | null;
+  city: { id: number | string; name: string };
+  country: { id: number | string; name: string };
+  geom: any | null;
+  postal_code: string | null;
+  street: string | null;
+};
+
+type QuickSearchList = QuickSearchResult[];
 
 const QUICK_SEARCH = gql`
   query QuickSearch($query: String, $latitude: Float, $longitude: Float, $radius: Float) {
     quickSearch(query: $query, latitude: $latitude, longitude: $longitude, radius: $radius) {
       quickSearch {
-        city {
-          id
-          name
-        }
-        country {
-          name
-          id
-        }
+        city { id name }
+        country { name id }
         geom
         id
         postal_code
@@ -43,24 +45,24 @@ const QUICK_SEARCH = gql`
       search_type
     }
   }
-`
+`;
 
 const ADD_TO_RECENTS = gql`
-mutation Mutation($input: RecentSearchesInput) {
-  addToRecents(input: $input) {
-    city
-    latitude
-    longitude
-    postal_code
-    street
-    tag
-    userId
+  mutation Mutation($input: RecentSearchesInput) {
+    addToRecents(input: $input) {
+      city
+      latitude
+      longitude
+      postal_code
+      street
+      tag
+      userId
+    }
   }
-}
-`
+`;
 
 type Segment = 'for-sale' | 'for-rent' | 'sold';
-type SeachFields = 'city' | 'postal_code' | 'string'
+type SearchFields = 'city' | 'postal_code' | 'street';
 
 const SUGGESTIONS = [
   '2 bedroom in Paris',
@@ -70,135 +72,140 @@ const SUGGESTIONS = [
 ];
 
 interface SubmitInput {
-  type: 'recents' | 'search'
-  searchType?: SeachFields,
-  value: string,
-  tag?: string
+  type: 'recents' | 'search';
+  searchType?: SearchFields;
+  value: string;
+  tag?: string;
 }
 
 const RedesignedSearch = () => {
   const { theme } = useTheme();
   const router = useRouter();
-  const params = useLocalSearchParams<{ query?: string }>();
 
   const [query, setQuery] = useState<string>('');
-  // const [query, setQuery] = useState<string>(params?.query || '');
   const [segment, setSegment] = useState<Segment>('for-sale');
-  const [recent, setRecent] = useState<string[]>([]);
   const [usingLocation, setUsingLocation] = useState<boolean>(false);
   const [locationLabel, setLocationLabel] = useState<string>('Current Location');
-  const [results, setResults] = useState([])
-  const [searchType, setSearchType] = useState('')
+  const [results, setResults] = useState<QuickSearchList>([]);
+  const [searchType, setSearchType] = useState<SearchFields | ''>('');
+  // FIX #4 — track debounce-pending state to prevent recents flash while user is still typing
+  const [isPending, setIsPending] = useState<boolean>(false);
+  // FIX #5 — surface search errors to the user instead of silently swallowing them
+  const [searchError, setSearchError] = useState<string | null>(null);
 
-  const [searchQuery, {loading: fetching, error: fetchError}] = useLazyQuery(QUICK_SEARCH)
-  const [addToRecents, {loading: addingToRecents, error: addError}] = useMutation(ADD_TO_RECENTS)
-  const {data: recentData, loading: loadingRecents, } = useGetRecents()
-  const user = useAuthStore(state => state.user)
-  const addToRecentsStore = useSearchStore(state => state.addToRecents)
-
-  console.log({recentData})
+  const [searchQuery, { loading: fetching }] = useLazyQuery(QUICK_SEARCH);
+  const [addToRecents] = useMutation(ADD_TO_RECENTS);
+  const { data: recentData, loading: loadingRecents } = useGetRecents();
+  const user = useAuthStore((state) => state.user);
+  const addToRecentsStore = useSearchStore((state) => state.addToRecents);
 
   const inputRef = useRef<TextInput>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
+  // Clear debounce timer on unmount to prevent state updates on unmounted component
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, []);
 
   const handleChange = (text: string) => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current)
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+
+    if (text.trim().length < 3) {
+      // Reset immediately for short inputs — no need to debounce
+      setIsPending(false);
+      setResults([]);
+      setSearchType('');
+      setSearchError(null);
+      return;
     }
 
+    // FIX #4 — mark as pending so showLists stays false during the debounce window
+    setIsPending(true);
     timeoutRef.current = setTimeout(() => {
-      runsearch(text)
-    }, 600); 
-  }
+      runSearch(text);
+    }, 600);
+  };
 
-  const runsearch = async (query: string) => {
-    if(query.trim()?.length < 3) return
-    console.log('Searching for:', query);
+  const runSearch = async (text: string) => {
+    setSearchError(null);
     try {
-      const st = performance.now()
-      const {data} = await searchQuery({
-        variables: {
-          query: query
-        }
-      })
-      const et = performance.now()
-      console.log(`duration ms: `, et-st)
-
-      console.log({data: data?.quickSearch.quickSearch})
-      setResults(data?.quickSearch?.quickSearch)
-      setSearchType(data?.quickSearch?.search_type)
-      Keyboard.dismiss()
+      const { data } = await searchQuery({ variables: { query: text } });
+      setResults(data?.quickSearch?.quickSearch ?? []);
+      setSearchType(data?.quickSearch?.search_type ?? '');
+      // FIX #1 — removed Keyboard.dismiss() here; dismissing mid-type closes the keyboard
+      // while the user is still typing, which is jarring UX
     } catch (error) {
-      console.log(error)
+      // FIX #5 — set error state so the UI can inform the user
+      setSearchError('Something went wrong. Please try again.');
+    } finally {
+      setIsPending(false);
     }
-  }
+  };
 
-  const getSearchValuePair = (recent:any): any => {
-    if (recent.postal_code) return {search: "postal_code", value: recent.postal_code}
-    if (recent.city) return {search: "city", value: recent.city}
-  }
+  const getSearchValuePair = (recent: any): { search: SearchFields; value: string } | null => {
+    if (recent.postal_code) return { search: 'postal_code', value: String(recent.postal_code) };
+    if (recent.city) return { search: 'city', value: recent.city };
+    return null;
+  };
 
-  console.log({user})
-  // Fetch properties (mock-aware); filter locally for demo search UX
-  // const { data, loading } = useProperties();
-  const data:any = [];
-  const loading = false
-  // const results = useMemo(() => {
-  //   if (!query) return [] as any[];
-  //   const normalized = query.toLowerCase();
-  //   return (data || []).filter((p: any) => {
-  //     const inTitle = p.title?.toLowerCase().includes(normalized);
-  //     const inCity = p.address?.city?.toLowerCase().includes(normalized);
-  //     // simple segment filter demo: map status/category to segment
-  //     const isSale = segment === 'for-sale';
-  //     const isRent = segment === 'for-rent';
-  //     const isSold = segment === 'sold';
-  //     const status = (p.status || 'ACTIVE').toLowerCase();
-  //     const bySegment = isSale ? status !== 'sold' : isRent ? true : status === 'sold';
-  //     return bySegment && (inTitle || inCity);
-  //   });
-  // }, [data, query, segment]);
+  // FIX #4 — isPending gates showLists so recents don't flash during the debounce window
+  const showLists = !query || (!isPending && !fetching && query.length > 0 && results.length === 0 && !searchError);
 
-  const showLists = !query || (query && !results?.length && !loading);
-
-  const handleSubmit = async(input: SubmitInput) => {
+  const handleSubmit = async (input: SubmitInput) => {
     const value = (input.value ?? query).trim();
-    console.log({value})
     if (!value) return;
 
-    if (input.type == 'search') {
-      if (!input.searchType || !input.tag) return
+    if (input.type === 'search') {
+      const resolvedSearchType = input.searchType || (searchType as SearchFields) || 'city';
+      const resolvedTag = input.tag || value;
+
       try {
         addToRecentsStore({
-          tag: input.tag, 
-          timestamp: Date.now(), 
-          [input.searchType]: input.value
-        })
-        if (!user) return
-        addToRecents({
-          variables: {
-            input: {
-              userId: user.id,
-              tag: input.tag,
-              [input.searchType]: input.value
-            }
-          }
-        })
+          tag: resolvedTag,
+          timestamp: Date.now(),
+          [resolvedSearchType]: value,
+        });
+        if (user) {
+          addToRecents({
+            variables: {
+              input: { userId: user.id, tag: resolvedTag, [resolvedSearchType]: value },
+            },
+          }).catch((err) => console.error('addToRecents mutation error:', err));
+        }
       } catch (error) {
-        
+        console.error('addToRecents store error:', error);
       }
+
+      Keyboard.dismiss();
+      router.dismissAll();
+      router.push({
+        pathname: '/(guest)/(tabs)/home/(search)/[query]',
+        params: {
+          query: JSON.stringify({
+            [resolvedSearchType]: value,
+            sale_status:
+              segment === 'for-rent' ? 'rent' : segment === 'for-sale' ? 'sale' : segment,
+          }),
+        },
+      });
+      return;
     }
-    
-    console.log({value}, [input.searchType ||searchType])
-    // setRecent((prev) => [value, ...prev.filter((v) => v !== value)].slice(0, 8));
-    router.dismissAll()
+
+    // type === 'recents'
+    Keyboard.dismiss();
+    router.dismissAll();
     router.push({
       pathname: '/(guest)/(tabs)/home/(search)/[query]',
-      params: { query: JSON.stringify({[input.searchType ||searchType]: value, sale_status: segment === 'for-rent' ? 'rent': segment === 'for-sale' ? 'sale': segment}) }
+      params: {
+        query: JSON.stringify({
+          ...(input.searchType ? { [input.searchType]: value } : { city: value }),
+          sale_status:
+            segment === 'for-rent' ? 'rent' : segment === 'for-sale' ? 'sale' : segment,
+        }),
+      },
     });
-    console.log('sisioi')
-    Keyboard.dismiss();
   };
 
   const requestLocation = async () => {
@@ -210,134 +217,176 @@ const RedesignedSearch = () => {
         return;
       }
       const loc = await Location.getCurrentPositionAsync({});
-      console.log({cords: loc.coords})
       const geocoded = await Location.reverseGeocodeAsync({
         latitude: loc.coords.latitude,
         longitude: loc.coords.longitude,
       });
       const first = geocoded?.[0];
       const label = [first?.city, first?.region, first?.country].filter(Boolean).join(', ');
-      const pretty = label || 'Current Location';
-      setLocationLabel(pretty);
-      setQuery(pretty);
+      setLocationLabel(label || 'Current Location');
+      setQuery(label || 'Current Location');
     } catch (e) {
-      setUsingLocation(false)
-      // ignore for now
+      console.error('Location error:', e);
     } finally {
       setUsingLocation(false);
       inputRef.current?.focus();
     }
   };
 
-  const renderSegment = (key: Segment, label: string, divider?: boolean) => (
-    <>
-      {/* {divider && segment !== key && <View style={[styles.segmentDivider, { backgroundColor: theme.colors.border }]} />} */}
-      <Pressable
-        onPress={() => setSegment(key)}
-        style={[styles.segmentButton, {
-          backgroundColor: segment === key ? theme.mode == 'dark' ? theme.colors.background2: theme.colors.background: 'transparent',
+  const renderSegment = (key: Segment, label: string) => (
+    <Pressable
+      key={key}
+      onPress={() => setSegment(key)}
+      style={[
+        styles.segmentButton,
+        {
+          backgroundColor:
+            segment === key
+              ? theme.mode === 'dark'
+                ? theme.colors.background2
+                : theme.colors.background
+              : 'transparent',
           borderColor: theme.colors.border,
           borderWidth: 0,
-          flex: 1
-        }]}
-        accessibilityRole="button"
-        accessibilityState={{ selected: segment === key }}
-      >
-        <ThemedText type="defaultSemiBold" style={{ color: theme.colors.text, }}>{label}</ThemedText>
-      </Pressable>
-      {/* {divider && segment == 'sold' ? <View style={[styles.segmentDivider, { backgroundColor: theme.colors.border }]} />: null}
-      {divider && segment == 'for-rent' ? <View style={[styles.segmentDivider, { backgroundColor: theme.colors.border }]} />: null} */}
-    </>
+          flex: 1,
+        },
+      ]}
+      accessibilityRole="button"
+      accessibilityState={{ selected: segment === key }}
+    >
+      <ThemedText type="defaultSemiBold" style={{ color: theme.colors.text }}>
+        {label}
+      </ThemedText>
+    </Pressable>
   );
 
-  function ListElement(item:any, tag:string) {
+  const ListElement = (item: any, tag: string) => {
     switch (tag) {
-      case 'city': {
+      case 'city':
         return (
-          <View style={{justifyContent: 'space-between', height: 40, flex:1}}>
-            <ThemedText style={{ marginLeft: 10, textTransform: 'capitalize' }}>{item?.city?.name}</ThemedText>
-            <ThemedText style={{ marginLeft: 10, textTransform: 'capitalize', color: theme.colors.textSecondary }}>{item?.country?.name} </ThemedText>
+          <View style={{ justifyContent: 'space-between', height: 40, flex: 1 }}>
+            <ThemedText style={{ marginLeft: 10, textTransform: 'capitalize' }}>
+              {item?.city?.name}
+            </ThemedText>
+            <ThemedText style={{ marginLeft: 10, textTransform: 'capitalize', color: theme.colors.textSecondary }}>
+              {item?.country?.name}
+            </ThemedText>
           </View>
-        )
-      }
-      case 'postal_code': {
+        );
+      case 'postal_code':
         return (
-          <View style={{justifyContent: 'space-between', height: 40}}>
+          <View style={{ justifyContent: 'space-between', height: 40 }}>
             <ThemedText style={{ marginLeft: 10 }}>{item.postal_code}</ThemedText>
-            <ThemedText style={{ marginLeft: 10, color: theme.colors.textSecondary }}>{item?.city?.name}, {item.country?.name} </ThemedText>
+            <ThemedText style={{ marginLeft: 10, color: theme.colors.textSecondary }}>
+              {item?.city?.name}, {item?.country?.name}
+            </ThemedText>
           </View>
-        )
-      }
-      default: {
+        );
+      default:
         return (
-          <View style={{justifyContent: 'space-between', height: 40}}>
+          <View style={{ justifyContent: 'space-between', height: 40 }}>
             <ThemedText style={{ marginLeft: 10 }}>{item.street}</ThemedText>
-            <ThemedText style={{ marginLeft: 10, color: theme.colors.textSecondary }}>{item?.city?.name}, {item.country?.name} </ThemedText>
+            <ThemedText style={{ marginLeft: 10, color: theme.colors.textSecondary }}>
+              {item?.city?.name}, {item?.country?.name}
+            </ThemedText>
           </View>
-        )
-      }
+        );
     }
-  }
+  };
 
   const ListHeader = (
     <View style={{ paddingHorizontal: 16, gap: 12 }}>
-      
-
-      {/* Current Location */}
-      
-
-      {/* {showLists && ( */}
-        <>
-          <ThemedText type="defaultSemiBold" style={{ marginVertical: 8 }}>{showLists? "Recents": "Search results"}</ThemedText>
-        </>
-      {/* )} */}
+      <ThemedText type="defaultSemiBold" style={{ marginVertical: 8 }}>
+        {showLists ? 'Recents' : 'Search results'}
+      </ThemedText>
     </View>
   );
 
-  const dataToRender = showLists
-    ? recentData?.map((r:any, index:number) => ({ type: 'recent', id: `recent-${index}`, title: r.tag, ...r }))
-        .concat(SUGGESTIONS?.map((s) => ({ type: 'suggest', id: `s-${s}`, title: s })))
-    : results
-    // : results.map((item: any) => ({ type: 'result', id: item.id, title: `${item.street} • ${item?.city_name}` }));
+  // FIX #6 — wrap in useMemo to prevent rebuilding on every render
+  const dataToRender = useMemo(() => {
+    if (!showLists) return results;
+    return (recentData ?? [])
+      .map((r: any, index: number) => ({
+        type: 'recent',
+        id: `recent-${index}`,
+        title: r.tag,
+        ...r,
+      }))
+      .concat(SUGGESTIONS.map((s) => ({ type: 'suggest', id: `s-${s}`, title: s })));
+  }, [showLists, recentData, results]);
 
-  const renderItem = ({ item, index }: {item: any, index: number}) => {
-    if (item.type === 'recent' || item.type === 'suggest') {
+  // FIX #6 — useCallback so renderItem reference is stable across renders
+  const renderItem = useCallback(
+    ({ item, index }: { item: any; index: number }) => {
+      if (item.type === 'recent' || item.type === 'suggest') {
+        return (
+          <Pressable
+            onPress={() => {
+              setQuery(item.title);
+              if (item.type === 'suggest') {
+                handleSubmit({ type: 'search', value: item.title });
+              } else {
+                const pair = getSearchValuePair(item);
+                if (pair) {
+                  handleSubmit({ type: 'recents', value: pair.value, searchType: pair.search });
+                } else {
+                  handleSubmit({ type: 'recents', value: item.title });
+                }
+              }
+            }}
+            style={[styles.row, { borderColor: theme.colors.border, backgroundColor: theme.colors.card, marginTop: 0 }]}
+          >
+            <Ionicons
+              name={item.type === 'recent' ? 'time-outline' : 'sparkles-outline'}
+              size={18}
+              color={theme.colors.textSecondary}
+            />
+            <ThemedText style={{ marginLeft: 10 }}>{item.title}</ThemedText>
+          </Pressable>
+        );
+      }
+
       return (
-        <Pressable
-          onPress={() => { setQuery(item.title); handleSubmit(item.title); }}
-          style={[styles.row, { borderColor: theme.colors.border, backgroundColor: theme.colors.card, marginTop: 0, }]}
+        <TouchableOpacity
+          onPress={() =>
+            handleSubmit({
+              searchType: searchType as SearchFields,
+              type: 'search',
+              // city.id is intentional — server uses it for direct DB lookup rather than name search
+              value:
+                searchType === 'city'
+                  ? item?.city?.id
+                  : searchType === 'postal_code'
+                  ? item.postal_code
+                  : item.geom,
+              tag:
+                searchType === 'city'
+                  ? item?.city?.name
+                  : searchType === 'postal_code'
+                  ? item.postal_code
+                  : item.street,
+            })
+          }
+          style={[styles.row, { borderWidth: 0, marginTop: 0, paddingHorizontal: 5, paddingVertical: 8 }]}
         >
-          <Ionicons name={item.type === 'recent' ? 'time-outline' : 'sparkles-outline'} size={18} color={theme.colors.textSecondary} />
-          <ThemedText style={{ marginLeft: 10 }}>{item.title}</ThemedText>
-        </Pressable>
+          <Ionicons
+            name="home-outline"
+            size={18}
+            color={theme.colors.textSecondary}
+            style={{ backgroundColor: 'rgba(179, 223, 217, 0.9)', padding: 15, borderRadius: 8 }}
+          />
+          {ListElement(item, searchType)}
+        </TouchableOpacity>
       );
-    }
-    return (
-      <TouchableOpacity
-        onPress={() => handleSubmit({
-          searchType: searchType as SeachFields,
-          type: 'search',
-          value: searchType == 'city'? item?.city?.id :
-            searchType == 'postal_code'? item.postal_code: 
-            item.geom,
-          tag: searchType == 'city'? item?.city?.name :
-            searchType == 'postal_code'? item.postal_code: 
-            item.street
-          },
-        )}
-        style={[styles.row, {borderWidth: 0, marginTop: 0, paddingHorizontal: 5, paddingVertical: 8}]}
-      >
-        <Ionicons name="home-outline" size={18} color={theme.colors.textSecondary} style={{backgroundColor: 'rgba(179, 223, 217, 0.9)', padding: 15, borderRadius: 8, }} />
-        {ListElement(item, searchType)}
-      </TouchableOpacity>
-    );
-  };
+    },
+    [searchType, theme, handleSubmit]
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <View style={{ paddingHorizontal: 16, gap: 12, paddingBottom: 0}}>
-        {/* Top bar */}
-        <View style={[styles.searchRow, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }] }>
+      <View style={{ paddingHorizontal: 16, gap: 12, paddingBottom: 0 }}>
+        {/* Search bar */}
+        <View style={[styles.searchRow, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
           <TouchableOpacity onPress={() => router.back()} accessibilityRole="button" style={styles.backIcon}>
             <Ionicons name="chevron-back" size={22} color={theme.colors.text} />
           </TouchableOpacity>
@@ -348,76 +397,158 @@ const RedesignedSearch = () => {
             placeholderTextColor={theme.colors.textSecondary}
             value={query}
             onChangeText={(t) => {
-              setQuery(t)
-              handleChange(t)
+              setQuery(t);
+              handleChange(t);
             }}
-            returnKeyType="none"
-            // onSubmitEditing={() => handleSubmit}
+            returnKeyType="search"
+            onSubmitEditing={() =>
+              handleSubmit({
+                value: query,
+                type: 'search',
+                searchType: (searchType as SearchFields) || 'city',
+                tag: query,
+              })
+            }
             autoFocus
           />
-          {query?.length > 0 && (
-            <Pressable onPress={() => setQuery('')} style={styles.clearIcon} accessibilityRole="button">
-               <Ionicons name="close-circle" size={18} color={theme.colors.textSecondary} />
+          {query.length > 0 && (
+            <Pressable
+              onPress={() => {
+                setQuery('');
+                setResults([]);
+                setSearchType('');
+                setSearchError(null);
+                setIsPending(false);
+              }}
+              style={styles.clearIcon}
+              accessibilityRole="button"
+            >
+              <Ionicons name="close-circle" size={18} color={theme.colors.textSecondary} />
             </Pressable>
           )}
         </View>
 
         {/* Segmented control */}
-        <View style={[{ borderColor: theme.colors.border, backgroundColor: theme.colors.backgroundSec, borderRadius: 10 }]}>
+        <View style={{ borderColor: theme.colors.border, backgroundColor: theme.colors.backgroundSec, borderRadius: 10 }}>
           <View style={styles.segmentInner}>
-            {renderSegment('for-rent', 'For Rent', true )}
-            {renderSegment('for-sale', 'For Sale', true)}
-            {renderSegment('sold', 'Sold',)}
+            {renderSegment('for-rent', 'For Rent')}
+            {renderSegment('for-sale', 'For Sale')}
+            {renderSegment('sold', 'Sold')}
           </View>
         </View>
-        {/* Lists header */}
 
-        <View style={{flexDirection: 'row', alignItems: 'center', gap: 8,}}>
-          <Pressable onPress={requestLocation} style={[styles.locationRow, {flex: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.card }]} accessibilityRole="button">
+        {/* Location row */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <Pressable
+            onPress={requestLocation}
+            style={[styles.locationRow, { flex: 1, borderColor: theme.colors.border, backgroundColor: theme.colors.card }]}
+            accessibilityRole="button"
+          >
             <MaterialCommunityIcons name="crosshairs-gps" color={theme.colors.accent} size={20} />
-            <ThemedText type="defaultSemiBold" style={{ flex:1, marginLeft: 10 }}>{locationLabel}</ThemedText>
-            {usingLocation && <ActivityIndicator animating={usingLocation} size="small" color={theme.colors.accent} />}
+            <ThemedText type="defaultSemiBold" style={{ flex: 1, marginLeft: 10 }}>
+              {locationLabel}
+            </ThemedText>
+            {usingLocation && <ActivityIndicator animating size="small" color={theme.colors.accent} />}
           </Pressable>
-          <TouchableOpacity style={{ }}>
-            <Ionicons name='earth-sharp' size={35} color={theme.colors.accent} />
-            {/* <Earth /> */}
+          <TouchableOpacity>
+            <Ionicons name="earth-sharp" size={35} color={theme.colors.accent} />
           </TouchableOpacity>
         </View>
-        {/* <Line orientation='horizontal' /> */}
       </View>
-      {showLists ? (<>
-        {ListHeader}
-        <View style={{marginHorizontal: 12, borderWidth: 1, gap: 0, borderRadius: 16, borderColor: theme.colors.border}}>
-          {dataToRender?.map((item: any, index: any) => (
-            <Pressable 
-              onPress={() => handleSubmit({type: 'recents', value: getSearchValuePair(item)?.value, searchType: getSearchValuePair(item)?.search})} key={index}
-              style={{padding: 12, flexDirection: 'row', alignItems: 'center', borderBottomWidth: index+1== dataToRender?.length ? 0:1, borderColor: theme.colors.border}}
-            >
-              <Ionicons name={item.type === 'recent' ? 'time-outline' : 'sparkles-outline'} size={22} color={theme.colors.accent} />
-              <ThemedText style={{ marginLeft: 10, textTransform: 'capitalize', width: '100%' }}>{item.title}</ThemedText>
-            </Pressable>
-          ))}
+
+      {/* FIX #5 — error state rendered inline above the list */}
+      {searchError && (
+        <View style={[styles.errorBanner, { backgroundColor: theme.colors.card, borderColor: theme.colors.border }]}>
+          <Ionicons name="alert-circle-outline" size={16} color="#e05c5c" />
+          <ThemedText style={{ marginLeft: 8, color: '#e05c5c', fontSize: 13 }}>{searchError}</ThemedText>
         </View>
-      </>):(
+      )}
+
+      {/* FIX #4 — show loading indicator during debounce + fetch instead of flashing recents */}
+      {(isPending || (fetching && query.length >= 3)) && !searchError ? (
+        <View style={{ padding: 24, alignItems: 'center' }}>
+          <ActivityIndicator color={theme.colors.accent} />
+        </View>
+      ) : showLists ? (
+        <>
+          {ListHeader}
+          {/* FIX — loadingRecents: show skeleton instead of partially-rendered list */}
+          {loadingRecents ? (
+            <View style={{ padding: 24, alignItems: 'center' }}>
+              <ActivityIndicator color={theme.colors.accent} />
+            </View>
+          ) : (
+            <View style={{ marginHorizontal: 12, borderWidth: 1, gap: 0, borderRadius: 16, borderColor: theme.colors.border }}>
+              {dataToRender.map((item: any, index: number) => {
+                const pair = item.type === 'recent' ? getSearchValuePair(item) : null;
+                return (
+                  <Pressable
+                    key={item.id ?? index}
+                    onPress={() => {
+                      if (item.type === 'suggest') {
+                        handleSubmit({ type: 'search', value: item.title });
+                      } else if (pair) {
+                        handleSubmit({ type: 'recents', value: pair.value, searchType: pair.search });
+                      } else {
+                        handleSubmit({ type: 'recents', value: item.title });
+                      }
+                    }}
+                    style={{
+                      padding: 12,
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      borderBottomWidth: index + 1 === dataToRender.length ? 0 : 1,
+                      borderColor: theme.colors.border,
+                    }}
+                  >
+                    <Ionicons
+                      name={item.type === 'recent' ? 'time-outline' : 'sparkles-outline'}
+                      size={22}
+                      color={theme.colors.accent}
+                    />
+                    <ThemedText style={{ marginLeft: 10, textTransform: 'capitalize', width: '100%' }}>
+                      {item.title}
+                    </ThemedText>
+                  </Pressable>
+                );
+              })}
+            </View>
+          )}
+        </>
+      ) : (
         <FlatList
           keyboardShouldPersistTaps="handled"
           data={results}
-          keyExtractor={(it: any) => it.id || it.city.id}
+          // FIX #2 — stable key: Math.random() causes unnecessary re-renders; use index as last resort
+          keyExtractor={(it: any, index: number) =>
+            it.id != null
+              ? String(it.id)
+              : it.city?.id != null
+              ? `city-${it.city.id}-${index}`
+              : `item-${index}`
+          }
           ListHeaderComponent={ListHeader}
           renderItem={renderItem}
-          contentContainerStyle={{ paddingBottom: Platform.select({ ios: 84, android: 124 }), }}
-          ListFooterComponent={loading && query ? (
-            <View style={{ padding: 16 }}>
-              <ActivityIndicator color={theme.colors.accent} />
-            </View>
-          ) : null}
-        /> 
+          contentContainerStyle={{ paddingBottom: Platform.select({ ios: 84, android: 124 }) }}
+        />
       )}
-      
-      <TouchableOpacity onPress={() => handleSubmit({value: query, type: 'search'})} 
-        style={[styles.submitButton, { backgroundColor: theme.colors.text,}]}
+
+      {/* Floating Search button */}
+      <TouchableOpacity
+        onPress={() =>
+          handleSubmit({
+            value: query,
+            type: 'search',
+            searchType: (searchType as SearchFields) || 'city',
+            tag: query,
+          })
+        }
+        disabled={!query}
+        style={[styles.submitButton, { backgroundColor: theme.colors.text }]}
       >
-        <ThemedText style={{fontSize: 16, color: theme.colors.background, textAlign: 'center'}}>Search {`202+`}</ThemedText>
+        <ThemedText style={{ fontSize: 16, color: theme.colors.background, textAlign: 'center' }}>
+          Search
+        </ThemedText>
       </TouchableOpacity>
     </View>
   );
@@ -425,11 +556,19 @@ const RedesignedSearch = () => {
 
 const styles = StyleSheet.create({
   submitButton: {
-    position: 'absolute', bottom:  20, flex: 1, height: 60, width: '90%', alignSelf: 'center', borderRadius: 30, alignItems:'center', justifyContent:'center',
+    position: 'absolute',
+    bottom: 20,
+    flex: 1,
+    height: 60,
+    width: '90%',
+    alignSelf: 'center',
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   container: {
     flex: 1,
-    paddingTop: 60
+    paddingTop: 60,
   },
   searchRow: {
     flexDirection: 'row',
@@ -453,10 +592,6 @@ const styles = StyleSheet.create({
   clearIcon: {
     paddingHorizontal: 4,
   },
-  segmentContainer: {
-    marginTop: 10,
-    borderWidth: 1,
-  },
   segmentInner: {
     padding: 4,
     flexDirection: 'row',
@@ -470,11 +605,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
   },
-  segmentDivider: {
-    width: 1,
-    alignSelf: 'stretch',
-    marginHorizontal: 8,
-  },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -484,7 +614,6 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 10,
     marginBottom: 5,
-    // flex: 1
   },
   row: {
     flexDirection: 'row',
@@ -495,7 +624,15 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     borderWidth: 1,
   },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
 });
 
 export default RedesignedSearch;
-

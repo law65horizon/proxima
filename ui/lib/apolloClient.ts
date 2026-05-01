@@ -19,20 +19,20 @@ import { createClient } from 'graphql-ws';
 const errorLink = onError(({ graphQLErrors, operation, forward }) => {
   if (graphQLErrors) {
     for (const err of graphQLErrors) {
-      if (err.extensions?.code === 'UNAUTHENTICATED') {
+      if (err.extensions?.code === 'TOKEN_EXPIRED') {
         return new Observable(observer => {
           (async () => {
             try {
-              const newAccessToken = await refreshAccessToken();
+              const {accessToken} = await refreshAccessToken();
 
-              if (!newAccessToken) {
+              if (!accessToken) {
                 throw new Error("Failed to refresh");
               }
 
               operation.setContext(({ headers = {} }) => ({
                 headers: {
                   ...headers,
-                  Authorization: `Bearer ${newAccessToken}`,
+                  Authorization: `Bearer ${accessToken}`,
                 },
               }));
 
@@ -102,8 +102,6 @@ const httpLink = new HttpLink({
 
 const wsLink = new GraphQLWsLink(
   createClient({
-    url: "wss://18a3-98-97-76-170.ngrok-free.app/subscriptions",
-    // url: "ws://192.168.85.1:4000/subscriptions",
     connectionParams: async () => {
       const token = await SecureStore.getItemAsync('accessToken')
       return {
@@ -353,6 +351,7 @@ export const refreshAccessToken = async () => {
               user {
                 id
                 email
+                role
               }
               sessionId
             }
@@ -387,7 +386,7 @@ export const refreshAccessToken = async () => {
         newRefreshToken,
         user,
         sessionId,
-        mode ?? 'guest'
+        mode
       );
 
       // Notify the auth store to update its state
@@ -400,7 +399,7 @@ export const refreshAccessToken = async () => {
         mode: mode ?? 'guest'
       });
 
-      return accessToken;
+      return {accessToken, user};
     } else {
       await triggerTokenRefreshFailed();
       client.clearStore();

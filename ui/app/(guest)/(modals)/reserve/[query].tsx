@@ -191,7 +191,7 @@ const ReservationScreen = () => {
     try {
       const amountInCents = Math.round(pricingInfo.price * 100);
       console.log({user})
-      const bookingResult = await createBooking({
+      const result = await createBooking({
         variables: {
           input: {
             guestId: user.id || 3,
@@ -203,14 +203,15 @@ const ReservationScreen = () => {
           }
         }
       })
+      const bookingResult = result.data.createBooking
 
       console.log({amountInCents})
 
-      const bookingId = bookingResult.data?.createBooking?.booking?.id;
+      const bookingId = bookingResult?.booking?.id;
       // const bookingId = '37'
-      // console.log({ios: bookingResult.data?.createBooking?.booking})
+      console.log({ios: bookingResult.data?.createBooking?.booking})
       if (!bookingId) {
-        return Alert.alert("Booking failed", "Booking could not be created.");
+        return Alert.alert("Booking failed", bookingResult.message??"Booking could not be created.");
       }
 
       console.log({bookingId})

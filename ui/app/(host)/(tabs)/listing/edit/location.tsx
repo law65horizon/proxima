@@ -314,11 +314,11 @@ export default function LocationScreen() {
             marginTop: 10,
           }}
         >
-          {loadingAddress ? <ActivityIndicator /> :
+          {/* {loadingAddress ? <ActivityIndicator /> : */}
             <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
               Locate on Map
             </Text>
-          }
+          {/* } */}
         </TouchableOpacity>
 
         {/* Use Current Location button */}
@@ -332,9 +332,11 @@ export default function LocationScreen() {
             marginTop: 12,
           }}
         >
-          <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
-            Use Current Location
-          </Text>
+          {loadingAddress ? <ActivityIndicator /> :
+            <Text style={{ color: "#fff", fontSize: 16, fontWeight: "600" }}>
+              Use Current Location
+            </Text>
+          }
         </TouchableOpacity>
 
       </ScrollView>

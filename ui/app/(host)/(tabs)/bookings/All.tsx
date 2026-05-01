@@ -6,14 +6,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React from 'react';
 import {
-    ActivityIndicator,
-    Alert,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  Alert,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
 } from 'react-native';
 
 const GET_All_BOOKINGS = gql`
@@ -295,7 +294,8 @@ export default function AllTabScreen() {
       refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} />}
     >
       {(loading && bookings.length === 0) ? (
-        <ActivityIndicator size="large" color={theme.colors.primary} style={{ marginTop: 60 }} />
+        // <ActivityIndicator size="large" color={theme.colors.primary} style={{ marginTop: 60 }} />
+        <></>
       ) : bookings.length === 0 ? (
         <View style={styles.emptyState}>
           <Ionicons name="calendar-outline" size={64} color={theme.colors.textSecondary} />

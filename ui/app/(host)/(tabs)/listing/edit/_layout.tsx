@@ -8,7 +8,7 @@ export default function Create_Edit_Property() {
             <Stack.Screen name='description_amenities' options={{headerShown: false, }}/>
             <Stack.Screen name='photos' options={{headerShown: false, }}/>
             <Stack.Screen name='pricing' options={{headerShown: false, }}/>
-            <Stack.Screen name='crep4' options={{headerShown: false, }}/>
+            <Stack.Screen name='review' options={{headerShown: false, }}/>
         </Stack>
     )
 }

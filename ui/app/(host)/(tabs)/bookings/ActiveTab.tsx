@@ -6,7 +6,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   Modal,
   RefreshControl,
@@ -15,7 +14,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 const GET_ACTIVE_BOOKINGS = gql`
@@ -365,7 +364,8 @@ export default function ActiveTabScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={refetch} />}
       >
         {loading ? (
-          <ActivityIndicator size="large" color={theme.colors.primary} style={{ marginTop: 60 }} />
+          <></>
+          // <ActivityIndicator size="large" color={theme.colors.primary} style={{ marginTop: 60 }} />
         ) : bookings.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="home-outline" size={64} color={theme.colors.textSecondary} />

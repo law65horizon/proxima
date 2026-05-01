@@ -45,6 +45,7 @@ export const VERIFY_CODE = gql`
       user {
         id
         email
+        role
       }
       sessionId
     }
