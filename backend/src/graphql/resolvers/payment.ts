@@ -5,9 +5,10 @@ import { Pool } from 'pg';
 import DataLoader from 'dataloader';
 import pool from '../../config/database.js';
 import { GraphQLError } from 'graphql';
-import { User } from '../../models/User.js';
+import { AuthUser, Context, User } from '../../types/index.js';
+import { requireAuth, requireOwnerOrAdmin } from '../../middleware/guards.js';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
     apiVersion: '2025-11-17.clover',
     typescript: true
 });
@@ -25,18 +26,10 @@ export const paymentLoader = new DataLoader(async (ids: number[]) => {
 });
 export default {
   Query: {
-    getPayment: async (_: any, { bookingId }: { bookingId: number }, {db, user}:  {db: Pool, user: User}) => {
-        // const { userId, pool } = context;
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
+    getPayment: async (_: any, { bookingId }: { bookingId: number }, context: { db: Pool; user: AuthUser }) => {
+      const user = requireAuth(context);
 
-      const result = await db.query(
+      const result = await context.db.query(
         `SELECT p.* 
          FROM payments p
          INNER JOIN bookings b ON p.booking_id = b.id
@@ -46,9 +39,7 @@ export default {
         [bookingId, user.id]
       );
 
-      if (result.rows.length === 0) {
-        return null;
-      }
+      if (result.rows.length === 0) return null;
 
       const payment = result.rows[0];
       return {
@@ -62,17 +53,11 @@ export default {
       };
     },
 
-    getPaymentHistory: async (_: any, { userId }: { userId: number }, {db, user}:  {db: Pool, user: any}) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
+    getPaymentHistory: async (_: any, { userId }: { userId: number }, context: { db: Pool; user: AuthUser }) => {
+      const user = requireAuth(context);
+      requireOwnerOrAdmin(context, String(userId));  // prevents querying another user's history
 
-      const result = await db.query(
+      const result = await context.db.query(
         `SELECT p.* 
          FROM payments p
          INNER JOIN bookings b ON p.booking_id = b.id
@@ -91,64 +76,18 @@ export default {
         createdAt: payment.created_at,
       }));
     },
-    },
-    Mutation: {
-      // createPaymentIntent: async (_: any, { input }: any ) => {
-      //       console.log({input})
-      //       const { bookingId, amount, currency } = input;
+  },
 
-      //       // Optional: validate booking exists & belongs to user
-      //       // const booking = await prisma.booking.findUnique({ where: { id: Number(bookingId) }});
-      //       const booking = await BookingModel.findById(parseInt(bookingId))
-      //       if (!booking) throw new Error("Booking not found.");
-
-      //       const paymentIntent = await stripe.paymentIntents.create({
-      //         amount,
-      //         currency,
-      //         metadata: {
-      //           bookingId: String(bookingId)
-      //         },
-      //         automatic_payment_methods: {
-      //           enabled: true
-      //         },
-              
-      //       });
-
-      //       // await stripe.checkout.sessions.create({
-      //       //     payment_intent_data: paymentIntent.id, // link the session with the created payment intent
-      //       //     success_url: 'https://your-success-url.com?session_id={CHECKOUT_SESSION_ID}', // Define your success URL here
-      //       //     cancel_url: 'https://your-cancel-url.com',
-      //       // })
-
-      //       paymentLoader.clear(bookingId)
-
-      //       return {
-      //         clientSecret: paymentIntent.client_secret!,
-      //         publishableKey: 'pk_test_51O5EKFEMz6QQdgMEosyoo1yD40SBHJmHcAudyYazrEk8r45xGH2p5nY7FwBNkCfs3tUncdGT0Twmh1ZYquejG3qz00dHkJJ5ev'
-      //       };
-      //   },
-
+  Mutation: {
     createCheckoutSession: async (
       _: any,
-      { input }: { input: {bookingId: string, successUrl: string, cancelUrl: string, paymentOption: 'FULL' | 'PARTIAL',} },
-      {user}
+      { input }: { input: { bookingId: string; successUrl: string; cancelUrl: string; paymentOption: 'FULL' | 'PARTIAL' } },
+      context: Context
     ) => {
-      console.time('resolver')
-      const {bookingId, successUrl, cancelUrl, paymentOption} = input
-      
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
+      const user = requireAuth(context);
 
-      console.log({user})
-      
-      // const stripeService = new StripeService(pool);
-      
+      const { bookingId, successUrl, cancelUrl, paymentOption } = input;
+
       try {
         const session = await StripeService.createCheckoutSession(
           parseInt(bookingId),
@@ -157,57 +96,47 @@ export default {
           cancelUrl,
           paymentOption
         );
-        paymentLoader.clear(parseInt(bookingId))
-        console.timeEnd('resolver')
-      
+        paymentLoader.clear(parseInt(bookingId));
         return session;
       } catch (error: any) {
-        console.error('Error creating checkout session:', error);
         throw new Error(error.message || 'Failed to create checkout session');
       }
     },
-        
-      processRefund: async (
+
+    processRefund: async (
       _: any,
       { bookingId, amount, reason }: { bookingId: number; amount?: number; reason?: string },
-      {user, db}: {db: Pool, user: any}
+      context: { db: Pool; user: AuthUser }
     ) => {
-      
-      if (!user) {
-        throw new Error('Authentication required');
-      }
-      
-      // Verify user owns the booking or is admin
-      const bookingCheck = await db.query(
+      const user = requireAuth(context);
+
+      const bookingCheck = await context.db.query(
         `SELECT guest_id FROM bookings WHERE id = $1`,
         [bookingId]
       );
-      
+
       if (bookingCheck.rows.length === 0) {
-        throw new Error('Booking not found');
+        throw new GraphQLError('Booking not found.', {
+          extensions: { code: 'NOT_FOUND', http: { status: 404 } },
+        });
       }
-      
-      if (bookingCheck.rows[0].guest_id !== user.userId) {
-        throw new Error('Unauthorized');
-      }
-      
-      // const stripeService = new StripeService(pool);
-      
+
+      requireOwnerOrAdmin(context, String(bookingCheck.rows[0].guest_id));
+
       try {
         const result = await StripeService.processRefund(bookingId, amount, reason);
         return {
           success: result.success,
           refundId: result.refundId,
           message: 'Refund processed successfully',
-        }
+        };
       } catch (error: any) {
-        console.error('Error processing refund:', error);
         return {
           success: false,
           refundId: null,
           message: error.message || 'Failed to process refund',
-        }
+        };
       }
     },
-  } 
+  },
 }

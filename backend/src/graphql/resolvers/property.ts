@@ -1,14 +1,16 @@
 // Updated property resolver
 import DataLoader from "dataloader";  
 import cloudinary from "../../config/cloudinary.js";
-import PropertyModel, { Property, Recents, SearchRoomsInput } from "../../models/Property.js";
-import { User } from "../../models/User.js";
+import PropertyModel, { Property } from "../../models/Property.js";
 import { getNestedRequestedFields, getRequestedFields, getRequestedFieldss } from "../../utils/getyRequestedFields.js";
 import { addressLoader, userLoader } from "./user.js";
 import pool from "../../config/database.js";
 import { GraphQLError, GraphQLScalarType, Kind } from "graphql";
 import { reveiwLoader } from "./review.js";
-import { info } from "console";
+import { info } from "console"
+import { User, Recents, AuthUser } from "../../types/index.js";
+import { SearchRoomsInput } from "../../types/input.js";
+import { requireAgent, requireAuth, requireOwnerOrAdmin } from "../../middleware/guards.js";
 
 // Date scalar
 const dateScalar = new GraphQLScalarType({
@@ -50,24 +52,18 @@ export default {
   Date: dateScalar,
   DateTime: dateTimeScalar,
   Query: {
-    getProperty: async (_: any, { id }: { id: string }, { user }: { user: User }, info: any) => {
+    getProperty: async (_: any, { id }: { id: string }, { user }: { user: AuthUser }, info: any) => {
       console.log('wowiowiwo')
       const requestedFields = getRequestedFields(info);
       const property = await PropertyModel.findById(parseInt(id), requestedFields);
       if (!property) return null;
       return property;
     },    
-    myProperties: async (_: any, { realtor_id }: { realtor_id: string }, { user }: { user: User }, info: any) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
+    myProperties: async (_: any, __: any, context, info: any) => {
+      // console.log({realtor_id})
+      const user = requireAuth(context)
       const requestedFields = getRequestedFields(info);
-      return await PropertyModel.findByRealtor(parseInt(realtor_id), requestedFields);
+      return await PropertyModel.findByRealtor(user.id, requestedFields);
     },
 
     searchRoomTypes: async (_: any, {input}: {input: SearchRoomsInput}, __: any, info: any) => {
@@ -95,67 +91,58 @@ export default {
       return await PropertyModel.getRoomTypes(ids.map(id => parseInt(id)), requiredFields)
     },
     
-    quickSearch: async (_, {query, latitude, longitude, radius}: {query: string, latitude: number, longitude: null, radius: number}, __:any, info: any) => {
-      return await PropertyModel.quickSearch(query, latitude, longitude, radius)
+    quickSearch: async (_, {query, latitude, longitude, radius}: {query: string, latitude: number, longitude: number, radius: number}, __:any, info: any) => {
+      const quick = await PropertyModel.quickSearch(query)
+      console.log({quick: quick.quickSearch[0]})
+      return quick
+      // return await PropertyModel.quickSearch(query, latitude, longitude, radius)
     },
 
-    searchRecents: async (_, {userId}: {userId: string}, {user}: {user: User}) => {
-      // if (!user || !user?.id) throw new Error('Unauthorized')
-      // if (parseInt(userId) !== user.id) throw new Error('Wrong User')
-      return await PropertyModel.searchRecents(parseInt(userId))
+    searchRecents: async (_, { userId }: { userId: string }, context: { user: AuthUser }) => {
+      const user = requireAuth(context);
+      if (user.id !== userId) {
+        throw new GraphQLError('You can only view your own recents.', {
+          extensions: { code: 'FORBIDDEN', http: { status: 403 } },
+        });
+      }
+      return await PropertyModel.searchRecents(parseInt(userId));
     },
   },
   Mutation: {
-    createProperty: async (_: any, { input }: { input: any }, { user }: { user: User }) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
+    createProperty: async (_: any, { input }: { input: any }, context: { user: AuthUser }) => {
+      requireAgent(context)
       const property = await PropertyModel.create(input);
       propertyImageLoader.clear(property.id);
       return property;
     },
-    updateProperty: async (_: any, { id, input }: { id: string; input: any }, { user }: { user: User }) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
+    updateProperty: async (_: any, { id, input }: { id: string; input: any }, context: { user: AuthUser }) => {
+      const user = requireAuth(context);
       const property = await PropertyModel.findById(parseInt(id));
-      if (!property || property.realtor_id !== user.id) throw new Error("Not authorized");
+      if (!property) throw new GraphQLError('Property not found.', {
+        extensions: { code: 'NOT_FOUND', http: { status: 404 } },
+      });
+      requireOwnerOrAdmin(context, property.realtor_id);
       const updatedProperty = await PropertyModel.update(parseInt(id), input);
       propertyImageLoader.clear(parseInt(id));
       return updatedProperty;
     },
-    deleteProperty: async (_: any, { id }: { id: string }, { user }: { user: User }) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
+    deleteProperty: async (_: any, { id }: { id: string }, context: { user: AuthUser }) => {
       const property = await PropertyModel.findById(parseInt(id));
-      if (!property || property.realtor_id !== user.id) throw new Error("Not authorized");
+      if (!property) throw new GraphQLError('Property not found.', {
+        extensions: { code: 'NOT_FOUND', http: { status: 404 } },
+      });
+      requireOwnerOrAdmin(context, property.realtor_id);
       const result = await PropertyModel.delete(parseInt(id));
       propertyImageLoader.clear(parseInt(id));
       return result;
     },
 
-    generateCloudinarySignature: async (_: any, __: any, { user }: { user: User }) => {
-      if (!user) throw new Error("Unauthorized");
+    generateCloudinarySignature: async (_: any, __: any, context: { user: AuthUser }) => {
+      requireAuth(context);
       const timestamp = Math.round(new Date().getTime() / 1000).toString();
       const signature = cloudinary.utils.api_sign_request(
         { timestamp, folder: "properties" },
-        process.env.CLOUDINARY_API_SECRET
+        process.env.CLOUDINARY_API_SECRET!
       );
       return {
         signature,
@@ -164,19 +151,10 @@ export default {
         apiKey: process.env.CLOUDINARY_API_KEY,
       };
     },
-    
-    addToRecents: async (_, {input}: {input: Omit<Recents, 'userId'> & {userId: string}}, {user}: {user: User}) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
-      // if (parseInt(input.userId) !== user.id) throw new Error('Wrong User')
-      console.log({input})
-      return await PropertyModel.addToRecents(input)
+
+    addToRecents: async (_, { input }: { input: Omit<Recents, 'userId'> & { userId: string } }, context: { user: AuthUser }) => {
+      const user = requireAuth(context);
+      return await PropertyModel.addToRecents(input);
     },
   },
   Property: {

@@ -1,0 +1,42 @@
+# home.graphql
+# Additions to the existing schema for the guest home screen
+
+# ── New types ──────────────────────────────────────────────────────────────────
+
+type PopularCity {
+  id: ID!
+  city: String!
+  country: String!
+  listingCount: Int!
+  # Representative cover image from a published listing in that city
+  coverImageUrl: String
+  latitude: Float
+  longitude: Float
+}
+
+type HomeScreenData {
+  featured: [RoomType!]!       # Recently published, high-rated listings (limit 6)
+  popularCities: [PopularCity!]! # Cities with most active listings (limit 8)
+}
+
+# ── New input ─────────────────────────────────────────────────────────────────
+
+input FeaturedRoomsInput {
+  # Optional: bias results toward a location
+  latitude: Float
+  longitude: Float
+  radiusKm: Int
+  # Filter by property type (maps to UI category chips)
+  propertyType: String          # apartment | house | hotel
+  saleStatus: String            # rent | sale
+  limit: Int                    # default 6
+}
+
+# ── Extend existing Query ─────────────────────────────────────────────────────
+# Add these to the Query type in your main schema:
+#
+type Query {
+    homeScreen(latitude: Float, longitude: Float): HomeScreenData!
+    featuredRoomTypes(input: FeaturedRoomsInput): [RoomType!]!
+    popularCities(latitude: Float, longitude: Float, limit: Int): [PopularCity!]!
+}

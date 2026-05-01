@@ -1,0 +1,185 @@
+type AgentProfile {
+  id: ID!
+  user_id: ID!
+  user: User
+  agency_name: String
+  cac_number: String
+  license_number: String
+  years_experience: Int
+  verification_status: VerificationStatus!
+  verified_at: String
+  id_type: IDType
+  id_verified: Boolean!
+  total_listings: Int!
+  total_bookings: Int!
+  avg_rating: Float
+  fee_waiver_until: String
+  platform_fee_pct: Float!
+  badges: [UserBadge]
+  created_at: String!
+  updated_at: String!
+}
+
+type UserBadge {
+  id: ID!
+  badge: Badge!
+  awarded_at: String!
+  expires_at: String
+}
+
+type Badge {
+  id: ID!
+  code: String!
+  label: String!
+  description: String
+  icon_url: String
+}
+
+enum VerificationStatus {
+  unverified
+  pending
+  verified
+  rejected
+}
+
+enum IDType {
+  NIN
+  BVN
+  passport
+  drivers_license
+}
+
+enum DocType {
+  cac_certificate
+  nin_slip
+  bvn_confirmation
+  agency_license
+  proof_of_address
+  passport_photo
+}
+
+enum DocStatus {
+  pending
+  approved
+  rejected
+}
+
+type VerificationDocument {
+  id: ID!
+  user_id: ID!
+  doc_type: DocType!
+  file_name: String
+  mime_type: String
+  status: DocStatus!
+  rejection_reason: String
+  created_at: String!
+}
+
+# Admin view — includes storage key for fetching the actual file
+type VerificationDocumentAdmin {
+  id: ID!
+  user_id: ID!
+  agent: User
+  doc_type: DocType!
+  storage_key: String!
+  file_name: String
+  mime_type: String
+  status: DocStatus!
+  rejection_reason: String
+  reviewed_at: String
+  created_at: String!
+}
+
+input RegisterAgentInput {
+  address: AddressInput
+  agency_name: String
+  cac_number: String
+  license_number: String
+  years_experience: Int
+  id_type: IDType
+}
+
+input AdminCreateAgentInput {
+  name: String!
+  email: String!
+  phone: String
+  agency_name: String
+  cac_number: String
+  license_number: String
+  years_experience: Int
+  skip_verification: Boolean
+  founding_partner: Boolean
+}
+
+input ReviewDocumentInput {
+  doc_id: ID!
+  action: ReviewAction!
+  rejection_reason: String
+}
+
+enum ReviewAction {
+  approve
+  reject
+}
+
+type AgentVerificationResponse {
+  success: Boolean!
+  message: String!
+  profile: AgentProfile
+}
+
+type PendingVerificationQueue {
+  total: Int!
+  documents: [VerificationDocumentAdmin!]!
+}
+
+type Query {
+  # Agent's own profile
+  myAgentProfile: AgentProfile
+
+  # Public agent profile (for renters viewing a listing)
+  agentProfile(userId: ID!): AgentProfile
+
+  # Admin: list all pending verification documents
+  pendingVerifications(limit: Int, offset: Int): PendingVerificationQueue!
+
+  # Admin: all documents for a specific agent
+  agentDocuments(userId: ID!): [VerificationDocumentAdmin!]!
+}
+
+type Mutation {
+  # Step 1: Agent registers their profile details
+  registerAgentProfile(input: RegisterAgentInput!): AgentVerificationResponse!
+
+  # Step 2: Agent notifies the server a document was uploaded to storage
+  # (presigned URL upload is handled client-side directly to R2/Supabase)
+  confirmDocumentUpload(
+    storage_key: String!
+    doc_type: DocType!
+    file_name: String
+    mime_type: String
+    file_size_bytes: Int
+  ): VerificationDocument!
+
+  # Admin: approve or reject a single document
+  reviewDocument(input: ReviewDocumentInput!): VerificationDocument!
+
+  # Admin: award a badge to any user
+  awardBadge(userId: ID!, badgeCode: String!, expiresAt: String): UserBadge!
+
+  # Admin: revoke a badge
+  revokeBadge(userBadgeId: ID!): Boolean!
+
+  #Admin: create agent
+  adminCreateAgent(input: AdminCreateAgentInput!): AgentVerificationResponse!
+
+  #Admin: claim account
+  claimAccount(token: String!, password: String!): AccountClaimed!
+}
+
+type AccountClaimed { 
+  accessToken: String!
+  refreshToken: String!
+  sessionId: String!
+  user: User!
+}

@@ -1,12 +1,15 @@
 // src/graphql/resolvers/review.ts
-import ReviewModel, { Review, ReviewInput } from '../../models/Review.js';
+import ReviewModel from '../../models/Review.js';
 import PropertyModel from '../../models/Property.js';
-import UserModel, {User} from '../../models/User.js';
+import UserModel from '../../models/User.js';
 import DataLoader from 'dataloader';
 import pool from '../../config/database.js';
 // import { Error } from '@apollo/server';
+import { User, Review, Context } from '../../types/index.js';
+import { ReviewInput } from '../../types/input.js';
+import { requireAuth, requireOwnerOrAdmin } from '../../middleware/guards.js';
 
-export const reveiwLoader = new DataLoader(async (ids: number[]) => {
+export const reveiwLoader = new DataLoader(async (ids: string[]) => {
   const query = `
     SELECT * FROM reviews
     WHERE room_type_id = ANY($1)
@@ -25,21 +28,21 @@ export default {
     },
   },
   Mutation: {
-    createReview: async (_: any, { input }: { input: ReviewInput }, { user }: { user: User }) => {
-      if (!user) throw new Error('Unauthorized');
+    createReview: async (_: any, { input }: { input: ReviewInput }, context: Context) => {
+      const user = requireAuth(context)
       reveiwLoader.clear(user.id)
       return await ReviewModel.create({ ...input, user_id: user.id });
     },
-    updateReview: async (_: any, { id, input }: { id: string; input: Review }, { user }: { user: User }) => {
-      if (!user) throw new Error('Unauthorized');
+    updateReview: async (_: any, { id, input }: { id: string; input: Review }, context: Context) => {
+      const user = requireAuth(context)
       const review = await ReviewModel.findById(id);
-      if (!review || review.guest_id !== user.id) throw new Error('Unauthorized');
+      requireOwnerOrAdmin(context, review.guest_id)
       return await ReviewModel.update(id, input);
     },
-    deleteReview: async (_: any, { id }: { id: string }, { user }: { user: User }) => {
-      if (!user) throw new Error('Unauthorized');
+    deleteReview: async (_: any, { id }: { id: string }, context: Context) => {
+      const user = requireAuth(context)
       const review = await ReviewModel.findById(id);
-      if (!review || review.guest_id !== user.id) throw new Error('Unauthorized');
+      requireOwnerOrAdmin(context, review.guest_id)
       return await ReviewModel.delete(id);
     },
   },

@@ -1,50 +1,9 @@
 
 import { Pool } from 'pg';
 import pool from '../config/database.js';
-import { User } from './User.js';
-import { Unit } from './Property.js';
 import { calculateNights, formatDate } from '../utils/helperFuncs.js';
-
-export interface Booking {
-  id: number
-  unit: Unit
-  guest: User
-  guest_id?: number
-  checkIn: Date
-  checkOut: Date
-  totalPrice: number
-  currency?: string  
-  status: string
-  source?: string
-  createdAt?: string
-}
-
-export interface BookingResult {
-  success: boolean;
-  message: string;
-  booking: Booking;
-  errors: string[];
-}
-
-export interface SearchBookingInput {
-  query?: string // guest name, email, booking id, property name
-  startDate?: Date
-  endDate?: Date
-  status?: 'pending' | 'confirmed' | 'active'
-  guestType?: 'all' | 'repeated' | 'first_time'
-  minPrice?: number
-  maxPrice?: number
-}
-
-export interface BookingInput {
-  guestId: number
-  checkIn: Date
-  checkOut: Date
-  roomTypeId: number
-  guestCount: number, 
-  specialRequests?: string
-  source: string
-}
+import { BookingResult, HostBookingsSummary, Booking, User } from '../types/index.js';
+import { BookingInput, SearchBookingInput } from '../types/input.js';
 
 
 
@@ -145,7 +104,9 @@ export class BookingModel {
     const cleaningFee = 50; // Could be from property settings
     const serviceFeePercent = 10;
     const serviceFee = subtotal * (serviceFeePercent / 100);
-    const total = subtotal + cleaningFee + serviceFee;
+    // const total = subtotal + cleaningFee + serviceFee;
+    const total = Math.ceil(nights * roomType.base_price)
+    console.log({total})
 
     return {
       roomTypeId,
@@ -303,7 +264,7 @@ export class BookingModel {
     }    
   }
 
-  async myBookings({userId, status}: {userId: number, status: string}): Promise<any[]> {
+  async myBookings({userId, status}: {userId: string, status: string}): Promise<any[]> {
     let query = `
       SELECT b.*, rt.name AS room_name, rt.id AS room_id, p.id AS property_id, p.title, p.property_type, p.address_id, p.realtor_id from bookings b
       INNER JOIN room_types rt ON rt.id = b.room_type_id
@@ -355,7 +316,35 @@ export class BookingModel {
     return bookings;
   }
 
-  async realtorBookings({userId, input}: {userId: number, input: SearchBookingInput}): Promise<any[]> {
+  async myBookingsSummary({userId, fields}: {userId, fields: any}): Promise<HostBookingsSummary> {
+    console.log({fields})
+    const query = `
+      SELECT
+        COUNT(*) FILTER (WHERE b.status = 'active') AS active_count,
+        COUNT(*) FILTER (WHERE b.status = 'completed') AS completed_count,
+        COUNT(*) FILTER (WHERE b.status = 'pending') AS pending_count,
+        COUNT(*) FILTER (WHERE b.status = 'confirmed') AS confirmed_count
+      FROM bookings b
+      INNER JOIN room_types rt ON rt.id = b.room_type_id
+      INNER JOIN properties p ON p.id = rt.property_id
+      WHERE p.realtor_id = $1
+    `
+    const result = await pool.query(query, [userId])
+
+    const pending_count = result.rows[0]?.pending_count || 0
+    const active_count = result.rows[0]?.active_count || 0
+    const upcoming_count = result.rows[0]?.confirmed_count || 0
+
+    const summary = {
+      pending_count,
+      active_count, 
+      upcoming_count,
+      total: pending_count + active_count + upcoming_count
+    }
+    return summary
+  }
+
+  async realtorBookings({userId, input}: {userId: string, input: SearchBookingInput}): Promise<any[]> {
     const {
       query: search,
       startDate,
@@ -394,7 +383,7 @@ export class BookingModel {
       WHERE p.realtor_id = $1
     `;
 
-    const params: any[] = [1];
+    const params: any[] = [userId];
     let idx = params.length + 1;
     // const params: any[] = [1];
 
@@ -548,7 +537,7 @@ export class BookingModel {
   }
 
   async update(id: number, updates: Partial<Booking>): Promise<Booking | null> {
-    const fields = [];
+    const fields: string[] = [];
     const values = [];
     let index = 1;
     if (updates.status) {
@@ -619,7 +608,7 @@ export class BookingModel {
       }
   }
 
-  async cancelBooking ({ bookingId, userId }: { bookingId: number, userId: number }): Promise<BookingResult> {
+  async cancelBooking ({ bookingId, userId }: { bookingId: number, userId: string }): Promise<BookingResult> {
     console.log('iosiosioiowjo')
     try {
       // Verify booking belongs to user

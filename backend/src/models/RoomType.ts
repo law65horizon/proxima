@@ -1,9 +1,10 @@
 // src/models/Message.ts
 import { Pool } from 'pg';
 import pool from '../config/database.js';
-import { RoomType, Unit } from './Property.js';
-import { User } from './User.js';
+import { RoomType, } from './Property.js';
 import room_type from '../graphql/resolvers/room_type.js';
+import { AuthUser, Unit, User } from '../types/index.js';
+
 
 export interface CreateRoomTypeInput {
     property_id: number
@@ -40,7 +41,7 @@ export  interface CreateRoomUnitInput {
 export class RoomTypeModel {
   constructor(private pool: Pool) {}
 
-  async createRoomType(input: CreateRoomTypeInput, user: User): Promise<{
+  async createRoomType(input: CreateRoomTypeInput, user: AuthUser): Promise<{
     success: boolean,
     message: string,
     room_type: RoomType
@@ -120,7 +121,7 @@ export class RoomTypeModel {
     }
   }
 
-  async updateRoomType(id: number, input: CreateRoomTypeInput, user: User): Promise<{
+  async updateRoomType(id: number, input: CreateRoomTypeInput, user: AuthUser): Promise<{
     success: boolean,
     message: string,
     room_type: RoomType
@@ -259,7 +260,7 @@ export class RoomTypeModel {
     }
   }
 
-  async deleteRoomType(id: number, user: User) {
+  async deleteRoomType(id: number, user: AuthUser) {
     const ownershipCheck = await pool.query(
       `SELECT p.realtor_id 
        FROM room_types rt 
@@ -301,7 +302,7 @@ export class RoomTypeModel {
   } 
 
   //units
-  async createRoomUnit(input: CreateRoomUnitInput, user: User): Promise<{
+  async createRoomUnit(input: CreateRoomUnitInput, user: AuthUser): Promise<{
     success: boolean,
     message: string,
     unit: Unit | null,
@@ -446,7 +447,7 @@ export class RoomTypeModel {
     }
   }
 
-  async updateRoomUnit(id: number, input: UpdateRoomUnitInput, user: User): Promise<{
+  async updateRoomUnit(id: number, input: UpdateRoomUnitInput, user: AuthUser): Promise<{
     success: boolean,
     message: string,
     unit: Unit
@@ -507,7 +508,7 @@ export class RoomTypeModel {
           
   }
 
-  async deleteRoomUnit(id: number, user: User) {
+  async deleteRoomUnit(id: number, user: AuthUser) {
     const ownershipCheck = await pool.query(
       `SELECT p.realtor_id 
        FROM room_units ru

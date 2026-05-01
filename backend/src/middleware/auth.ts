@@ -1,30 +1,39 @@
-import { NextFunction, Request, Response } from "express";
-import SessionManager from "./session.js";
+import { NextFunction, Request, Response } from 'express';
+import SessionManager from './session.js';
 
-export const authenticateJWT = async (req: Request, res: Response, next: NextFunction) => {
+export const authenticateJWT = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
   const authHeader = req.headers.authorization;
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    // return res.status(401).json({error: 'No token provided'})
     (req as any).user = null;
-    return next()
+    return next();
   }
 
-  const token = authHeader.replace('Bearer ', '')
-  const sessionData = await SessionManager.verifyAccessToken(token)
+  const token = authHeader.replace('Bearer ', '');
+  // console.log({token})
+  const result = await SessionManager.verifyAccessToken(token);
 
-  console.log({sessionData})
-  if (!sessionData) {
-    // return res.status(402).json({error: "Invalid or expired token"})
+  if (result.success === false) {
     (req as any).user = null;
-    return next()
+    (req as any).auth_msg = result.error;
+    console.log({error: result.error})
+    return next();
   }
 
+  const sessionData = result.session;
+  console.log({sessionData: sessionData});
+
+  // role comes from the session (which was seeded from the DB at login time)
   (req as any).user = {
-    id: sessionData.userId,
+    id: sessionData.userId,   // UUID string
     email: sessionData.email,
-    role: sessionData.role
-  }
+    role: sessionData.role,
+    sessionId: sessionData.sessionId
+  };
 
-  next()
-
-}
+  next();
+};

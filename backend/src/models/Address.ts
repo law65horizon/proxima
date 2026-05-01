@@ -1,15 +1,7 @@
 import { Pool } from "pg";
 import pool from "../config/database.js";
+import { Address } from "../types/index.js";
 
-export interface Address {
-    id: number;
-    street: string;
-    city: string;
-    postal_code?: string;
-    country: string;
-    latitude?: number;
-    longitude?: number;
-}
 
 export class AddressModel {
     constructor(public pool: Pool) {}

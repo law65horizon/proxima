@@ -80,11 +80,19 @@ type MyBookingResult {
   updated_at: String
 }
 
+type HostBookingsSummary {
+  pending_count: Int
+  upcoming_count: Int
+  active_count: Int
+  completed: Int
+  total: Int!
+}
+
 input SearchBookingsInput {
   query: String
   startDate: Date
   endDate: Date
-  status: BookingStatus!
+  status: BookingStatus
   guestType: GuestType
   minPrice: Float
   maxPrice: Float
@@ -95,6 +103,7 @@ type Query {
   myBookings: [MyBookingResult!]
   myBookingsByStatus(input: SearchBookingsInput!): [MyBookingResult!]
   calculateBookingPrice(roomTypeId: ID!, checkIn: Date!, checkOut: Date!): BookingPriceCalculation
+  myBookingsSummary: HostBookingsSummary!
 }
 
 type Mutation {

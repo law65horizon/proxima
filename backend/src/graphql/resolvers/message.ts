@@ -7,14 +7,20 @@ import DataLoader from 'dataloader';
 import { userLoader } from './user.js';
 import { propertyBookingLoader } from './booking.js';
 import { subscribe } from 'diagnostics_channel';
+import { AuthUser, Message } from '../../types/index.js';
+import { requireAuth } from '../../middleware/guards.js';
 
 const MESSAGE_ADDED = 'MESSAGE_ADDED';
 const MESSAGE_READ = 'MESSAGE_READ';
 const CONVERSATION_UPDATED = 'CONVERSATION_UPDATED'
 
 interface Context {
-  user?: { id: number; email: string };
+  user: AuthUser;
   loaders?: any;
+}
+
+interface ConversationMessage extends Message {
+  conversation_id: string
 }
 
 const unreadCountLoader = new DataLoader(async (keys: readonly { conversationId: number, userId: number }[]) => {
@@ -37,12 +43,8 @@ const unreadCountLoader = new DataLoader(async (keys: readonly { conversationId:
 
 export default {
   Query: {
-    conversations: async (_: any, { first = 20, after, filter }: any, { user, loaders }: Context) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: { code: 'UNAUTHENTICATED', http: { status: 401 } }
-        });
-      }
+    conversations: async (_: any, { first = 20, after, filter }: any, context: Context) => {
+      const user = requireAuth(context)
 
       let query = `
         SELECT
@@ -119,15 +121,8 @@ export default {
       };
     },
     
-    conversation: async (_: any, { conversationId, recipient, limit, offset }: any, { user }: Context) => {
-      // if (!user) {
-      //   throw new GraphQLError('Access token expired', {
-      //     extensions: {
-      //       code: 'UNAUTHENTICATED',
-      //       http: {status: 401 }
-      //     }
-      //   })
-      // }
+    conversation: async (_: any, { conversationId, recipient, limit, offset }: any, context: Context) => {
+      const user = requireAuth(context)
       console.log(conversationId, user?.id, recipient)
       if (!conversationId && !recipient) throw new Error('Invalid input')
 
@@ -164,12 +159,8 @@ export default {
       return result.rows[0];
     },
 
-    messages: async (_: any, { conversationId, limit = 50, offset = 0 }: any, { user }: Context) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: { code: 'UNAUTHENTICATED', http: { status: 401 } }
-        });
-      }
+    messages: async (_: any, { conversationId, limit = 50, offset = 0 }: any, context: Context) => {
+      const user = requireAuth(context)
 
       // Verify access with single query
       // const result = await pool.query(
@@ -212,15 +203,8 @@ export default {
   },
 
   Mutation: {
-    createConversation: async (_: any, { input }: any, { user }: Context) => {
-      // if (!user) {
-      //   throw new GraphQLError('Access token expired', {
-      //     extensions: {
-      //       code: 'UNAUTHENTICATED',
-      //       http: {status: 401 }
-      //     }
-      //   })
-      // }
+    createConversation: async (_: any, { input }: any, context: Context) => {
+      const user = requireAuth(context)
     
       const { propertyId, guestId, bookingId, initialMessage } = input;
     
@@ -272,12 +256,8 @@ export default {
       return conversation;
     },
 
-    sendMessage: async (_: any, { input }: any, { user }: Context) => {
-      // if (!user) {
-      //   throw new GraphQLError('Access token expired', {
-      //     extensions: { code: 'UNAUTHENTICATED', http: { status: 401 } }
-      //   });
-      // }
+    sendMessage: async (_: any, { input }: any, context: Context) => {
+      const user = requireAuth(context)
       console.time('sendMessage')
 
       const { conversationId, content, messageType = 'text' } = input;
@@ -383,12 +363,8 @@ export default {
       }
     },
 
-    markMessagesAsRead: async (_: any, { conversationId, messageIds }: any, { user }: Context) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: { code: 'UNAUTHENTICATED', http: { status: 401 } }
-        });
-      }
+    markMessagesAsRead: async (_: any, { conversationId, messageIds }: any, context: Context) => {
+      const user = requireAuth(context)
 
       let query = `
         UPDATE messages 
@@ -421,12 +397,9 @@ export default {
       return true;
     },
 
-    markAllAsRead: async (_: any, __: any, { user }: Context) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: { code: 'UNAUTHENTICATED', http: { status: 401 } }
-        });
-      }
+    markAllAsRead: async (_: any, __: any, context: Context) => {
+      const user = requireAuth(context)
+
 
       const result = await pool.query(
         `UPDATE messages m
@@ -439,9 +412,10 @@ export default {
          RETURNING m.*, c.id as conversation_id`,
         [user.id]
       );
+      const messages: ConversationMessage[] = result.rows;
 
       // Group by conversation and publish
-      const byConversation = result.rows.reduce((acc, msg) => {
+      const byConversation = messages.reduce((acc, msg) => {
         if (!acc[msg.conversation_id]) acc[msg.conversation_id] = [];
         acc[msg.conversation_id].push(msg);
         return acc;
@@ -520,15 +494,13 @@ export default {
       return userLoader.load(parent.guest_id);
     },
 
-    unreadCount: async (parent: any, _: any, {user}: any) => {
-      if (!user) return 1;
-      console.log({unredUser: user})
-      const count = await unreadCountLoader.load({ 
-        conversationId: parent.id, 
-        userId:  user.userId
+    unreadCount: async (parent: any, _: any, context: any) => {
+      if (!context.user) return 0;
+      const count = await unreadCountLoader.load({
+        conversationId: parent.id,
+        userId: context.user.id,   // BUG FIX: was context.user.userId
       });
-      console.log({count, id: user.id})
-      return count
+      return count;
     },
 
     lastMessage: async (parent: any, _: any) => {
@@ -567,7 +539,7 @@ export default {
 
 // export default {
 //   Query: {
-//     conversations: async (_: any, { first = 20, after, filter }: any, { user }: Context) => {
+//     conversations: async (_: any, { first = 20, after, filter }: any, context: Context) => {
 //       if (!user) {
 //         throw new GraphQLError('Access token expired', {
 //           extensions: {

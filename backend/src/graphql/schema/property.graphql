@@ -289,17 +289,23 @@ type QuickSearch {
   category: String
   created_at: String
   other: OtherInfo
-  city: NameIDPair
-  country: NameIDPair
+  city: CityResult
+  country: CountryResult
   geom: String
   postal_code: String
   street: String
 }
 
-type NameIDPair {
+type CityResult {
   id: ID!
   name: String!
 }
+
+type CountryResult {
+  id: ID!
+  name: String!
+}
+
 
 
 type QuickSearchResult {
@@ -338,7 +344,7 @@ type Query {
 
   getProperty(id: ID!): Property
 
-  myProperties(realtor_id: ID!): [Property!]!
+  myProperties: [Property!]!
 
   getRoomType(id: ID!): RoomType
   # Get calendar pricing and availability for a room type

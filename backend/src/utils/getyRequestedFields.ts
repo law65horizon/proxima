@@ -1,4 +1,5 @@
 import { GraphQLResolveInfo, FieldNode, SelectionNode } from 'graphql';
+import property from '../graphql/resolvers/property.js';
 
 /**
  * Recursively extracts field names from the GraphQLResolveInfo object.
@@ -8,6 +9,7 @@ import { GraphQLResolveInfo, FieldNode, SelectionNode } from 'graphql';
  * @param parentName - Optionally specify a nested field to extract.
  * @returns A list of requested field names.
  */
+const EXCLUDED = new Set(['address', 'realtor', 'images', '__typename']);
 export function getRequestedFieldss(
   info: GraphQLResolveInfo,
   parentName?: string
@@ -69,10 +71,20 @@ export function getRequestedFields(info: any): string[] {
       fields.push('address', ...addressFields);
     } else if (selection.name.value === 'property') {
       const propertyFields: string[] = selection.selectionSet?.selections.map((s: any) => {
-        if (s.name.value == 'address' || s.name.value == 'realtor' || s.name.value == '__typename') return '';
+        if (EXCLUDED.has(s.name.value.toLowerCase())) return '';
         return `p.${s.name.value}`
       }) || [];
       fields.push('property', ...propertyFields);
+    } else if (selection.name.value === 'featured') {
+      selection.selectionSet?.selections.map((s: any) => {
+        if (s.name.value === 'property') {
+          const propertyFields: string[] = s.selectionSet?.selections.map((s: any) => {
+            if (EXCLUDED.has(s.name.value.toLowerCase())) return '';
+            return `p.${s.name.value}`
+          }) || [];
+          fields.push(...propertyFields);
+        }
+      })
     } else {
       fields.push(selection.name.value);
     }
@@ -91,7 +103,7 @@ export function getNestedRequestedFields(info: any): string[] {
       fields.push('address', ...addressFields);
     } else if (selection.name.value === 'property') {
       const propertyFields: string[] = selection.selectionSet?.selections.map((s: any) => {
-        if (s.name.value == 'address' || s.name.value == 'realtor' || s.name.value == 'images' || s.name.value == '__typename') return '';
+        if (EXCLUDED.has(s.name.value.toLowerCase())) return '';
         return `p.${s.name.value}`
       }) || [];
       fields.push('property', ...propertyFields);

@@ -1,12 +1,16 @@
 // src/graphql/resolvers/booking.ts
 import DataLoader from 'dataloader';
-import BookingModel, { Booking, BookingInput, SearchBookingInput } from '../../models/Booking.js';
+import BookingModel from '../../models/Booking.js';
 import PropertyModel from '../../models/Property.js';
-import UserModel, {User} from '../../models/User.js';
+import UserModel from '../../models/User.js';
 import { roomUnitLoader, roomUnitLoader0 } from './property.js';
 import { userLoader } from './user.js';
 import {GraphQLError} from 'graphql'
 import { paymentLoader } from './payment.js';
+import { getRequestedFields } from '../../utils/getyRequestedFields.js';
+import { User, Booking, Context } from '../../types/index.js';
+import { SearchBookingInput, BookingInput } from '../../types/input.js';
+import { requireAuth, requireOwnerOrAdmin } from '../../middleware/guards.js';
 // import { A } from '@apollo/server';
 
 export const propertyBookingLoader = new DataLoader(async (propertyIds) => {
@@ -31,72 +35,43 @@ export default {
     getBooking: async (_: any, { id }: { id: string }) => {
       return await BookingModel.findById(parseInt(id));
     },
-    myBookings: async (_:any, __: any, {user}: {user: User}) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
-      return await BookingModel.myBookings({userId: user?.id, status: null});
+    myBookings: async (_:any, __: any, {context}: {context: Context}) => {
+      requireAuth(context)
+      return await BookingModel.myBookings({userId: context.user?.id, status: null});
     },
 
-    myBookingsByStatus: async (_:any, {input}: {input: SearchBookingInput}, {user}: {user: User}) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
+    myBookingsByStatus: async (_:any, {input}: {input: SearchBookingInput}, context: Context) => {
+      const user = requireAuth(context)
       // console.log({status})
       return await BookingModel.realtorBookings({userId: user?.id, input});
     },
 
     calculateBookingPrice: async (_: any, {roomTypeId, checkIn, checkOut}) => {
       return await BookingModel.calculateBookingPrice({roomTypeId, checkIn, checkOut});
+    },
+    
+    myBookingsSummary: async (_: any, __: any, context: Context, info: any) => {
+      const user = requireAuth(context)
+      const fields = getRequestedFields(info)
+      return await BookingModel.myBookingsSummary({userId: user.id, fields})
     }
   },
   Mutation: {
-    createBooking: async (_: any, { input }: { input: BookingInput }, { user }: { user: User }) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
+    createBooking: async (_: any, { input }: { input: BookingInput }, context: Context) => {
+      requireAuth(context)
       return await BookingModel.create(input);
     },
-    updateBooking: async (_: any, { id, status }: { id: string; status: string }, { user }: { user: User }) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
+    updateBooking: async (_: any, { id, status }: { id: string; status: string }, context: Context) => {
+      const user = requireAuth(context)
       const booking = await BookingModel.findById(parseInt(id));
-      if (!booking || booking.user_id !== user.id) throw new Error('Unauthorized');
+      requireOwnerOrAdmin(context, booking.guest_id)
       return await BookingModel.update(parseInt(id), { status });
     },
-    cancelBooking: async (_: any, { id }: { id: string }, { user }: { user: User }) => {
-      if (!user) {
-        throw new GraphQLError('Access token expired', {
-          extensions: {
-            code: 'UNAUTHENTICATED',
-            http: {status: 401 }
-          }
-        })
-      }
-      console.log({user, id})
+    cancelBooking: async (_: any, { id }: { id: string }, context: Context) => {
+      const user = requireAuth(context)
+      // console.log({user, id})
       const booking = await BookingModel.findById(parseInt(id));
-      if (!booking || booking.guest_id !== user.id) throw new Error('Unauthorized');
+      requireOwnerOrAdmin(context, booking.guest_id)
       return await BookingModel.cancelBooking({bookingId: parseInt(id), userId: user.id});
     },
     refreshRateCalendar: async (_:any, {id}) => {}

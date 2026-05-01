@@ -6,7 +6,9 @@
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "resolveJsonModule": true,
-    "outDir": "dist"
+    "outDir": "dist",
+    "strict": false,
+    "noImplicitAny": false
   }
 }
 

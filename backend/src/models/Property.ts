@@ -2,38 +2,16 @@
 import { Pool, PoolClient } from "pg";
 import pool from "../config/database.js";
 import redisClient from "../config/redis.js";
-import { Address } from "./Address.js";
 import cloudinary from "../config/cloudinary.js";
 import {deleteFromCloudinary} from '../utils/deleteFromCloudinary.js'
-// import {UserIn} from '@apollo/server'
+import {getCode} from 'country-list'
+import { Address, Unit, RateCalendar, Recents } from "../types/index.js";
+import { SearchRoomsInput, ImageManageMentInput, ImagesInput } from "../types/input.js";
 
 // ============================================
 // TYPES & INTERFACES
 // ============================================
 
-export type Recents ={
-  userId: number;
-  tag: string;
-  postal_code?: number,
-  city?: string;
-  latitude?: number,
-  longitude?: number
-}
-
-export type Unit = {
-  id: number;
-  roomTypeId: string;
-  unitCode?: string;
-  floorNumber?: number;
-  status?: string;
-};
-
-export type RateCalendar = {
-  date: string;
-  nightly_rate: number;
-  min_stay: number;
-  is_blocked: boolean;
-};
 
 export interface RoomType {
   id: number;
@@ -80,7 +58,7 @@ interface DurationDiscount {
 
 export interface Property {
   id: number;
-  realtor_id: number;
+  realtor_id: string;
   address_id: number;
   title: string;
   speciality: string;
@@ -115,42 +93,6 @@ export interface PropertyEdit {
   images?: ImageManageMentInput;
 }
 
-export interface SearchRoomsInput {
-  propertyType?: string[];
-  sale_status?: 'rent' | 'sale'
-  beds?: number;
-  bathrooms?: number;
-  minPrice?: number;
-  maxPrice?: number;
-  minSize?: number;
-  maxSize?: number;
-  amenities?: string[];
-  query?: string;
-  value?: string;
-  checkIn?: Date;
-  checkOut?: Date;
-  first?: number;
-  after?: string;
-  latitude?: number;
-  longitude?: number;
-  radius?: number;
-}
-
-export interface ImagesInput {
-  storage_key: string
-  uri: string
-  fileName: string
-  mimeType: string
-  width?: number
-  height?: number
-  fileSize: number
-}
-
-export interface ImageManageMentInput {
-  add: ImagesInput[],
-  remove: string[]
-  update: any[]
-}
 
 // ============================================
 // CONSTANTS
@@ -233,6 +175,7 @@ export class PropertyModel {
     pipeline.del(`roomType:property:${propertyId}`);
     
     if (realtorId) {
+      console.log({realtorId})
       pipeline.del(`properties:realtor:${realtorId}:*`);
     }
 
@@ -247,14 +190,31 @@ export class PropertyModel {
     client: PoolClient,
     address: Omit<Address, "id" | "created_at">
   ): Promise<number> {
+    const code = getCode(address.country)
+    console.log({code, coutry: address})
+    console.log(address.country.trim().toLocaleLowerCase())
     // Get or create country
     const countryResult = await client.query(
       `INSERT INTO countries (name, code)
        VALUES ($1, $2)
        ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
        RETURNING id`,
-      [address.country, address.country.slice(0, 2).toUpperCase()]
+      [address.country.trim().toLocaleLowerCase(), address.country.slice(0,2).toUpperCase()]
     );
+
+    // const countryResult = await client.query(
+    //   `WITH ins AS (
+    //      INSERT INTO countries (name, code)
+    //      VALUES ($1, $2)
+    //      ON CONFLICT (name) DO NOTHING
+    //      RETURNING id
+    //    )
+    //    SELECT id FROM ins
+    //    UNION ALL
+    //    SELECT id FROM countries WHERE name = $1
+    //    LIMIT 1`,
+    //   [address.country.trim().toLocaleLowerCase(), address.country.slice(0, 2).toUpperCase()]
+    // );
     const countryId = countryResult.rows[0].id;
 
     // Get or create city
@@ -263,7 +223,7 @@ export class PropertyModel {
        VALUES ($1, $2)
        ON CONFLICT (name, country_id) DO UPDATE SET name = EXCLUDED.name
        RETURNING id`,
-      [address.city, countryId]
+      [address.city.trim().toLocaleLowerCase(), countryId]
     );
     const cityId = cityResult.rows[0].id;
 
@@ -275,7 +235,7 @@ export class PropertyModel {
        SET geom = ST_SetSrid(ST_MakePoint($4, $5), 4326)::geography
        RETURNING id`,
       [
-        address.street,
+        address.street.trim().toLocaleLowerCase(),
         cityId,
         address.postal_code || null,
         address.latitude || null,
@@ -378,58 +338,58 @@ export class PropertyModel {
     };
   }
 
-  private buildAddressFilter(
-    query?: string,
-    latitude?: number,
-    longitude?: number,
-    radius?: number
-  ): string {
-    if(latitude && longitude && radius) {
-      return `
-        SELECT a.id, a.street, a.postal_code, a.geom, c.name as city_name, co.name as country_name
-        FROM addresses a
-        INNER JOIN cities c ON a.city_id = c.id
-        INNER JOIN countries co ON c.country_id = co.id
-        WHERE ST_DWITHIN(
-          a.geom, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography,
-          ${radius}
-        )
-      `
-    }
+  // private buildAddressFilter(
+  //   query?: string,
+  //   latitude?: number,
+  //   longitude?: number,
+  //   radius?: number
+  // ): string {
+  //   if(latitude && longitude && radius) {
+  //     return `
+  //       SELECT a.id, a.street, a.postal_code, a.geom, c.name as city_name, co.name as country_name
+  //       FROM addresses a
+  //       INNER JOIN cities c ON a.city_id = c.id
+  //       INNER JOIN countries co ON c.country_id = co.id
+  //       WHERE ST_DWITHIN(
+  //         a.geom, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326)::geography,
+  //         ${radius}
+  //       )
+  //     `
+  //   }
 
-    if (query) {
-      const parsed = this.parseAddressQuery(query)
+  //   if (query) {
+  //     const parsed = this.parseAddressQuery(query)
 
-      if (parsed.usePostalCode) {
-        const normalized = query.replace(/[^0-9]/g, '');
-        return `
-          SELECT a.id, a.street, a.postal_code, a.geom, c.name as city_name, c.id as city_id, co.name as country_name, c.id as city_id
-          FROM addresses a
-          INNER JOIN cities c ON a.city_id = c.id
-          INNER JOIN countries co ON c.country_id = co.id
-          WHERE a.postal_code ILIKE '%${normalized}%'
-        `
-      }
+  //     if (parsed.usePostalCode) {
+  //       const normalized = query.replace(/[^0-9]/g, '');
+  //       return `
+  //         SELECT a.id, a.street, a.postal_code, a.geom, c.name as city_name, c.id as city_id, co.name as country_name, c.id as city_id
+  //         FROM addresses a
+  //         INNER JOIN cities c ON a.city_id = c.id
+  //         INNER JOIN countries co ON c.country_id = co.id
+  //         WHERE a.postal_code ILIKE '%${normalized}%'
+  //       `
+  //     }
 
-      if(parsed.useCity) {
-        return `
-          SELECT a.id, a.street, a.postal_code, a.geom, c.name as city_name, c.id as city_id, co.name as country_name, c.id as city_id
-          FROM addresses a
-          INNER JOIN cities c ON a.city_id = c.id
-          INNER JOIN countries co ON c.country_id = co.id
-          WHERE c.name ILIKE '%${parsed.normalizedQuery}%'
-        `
-      }
+  //     if(parsed.useCity) {
+  //       return `
+  //         SELECT a.id, a.street, a.postal_code, a.geom, c.name as city_name, c.id as city_id, co.name as country_name, c.id as city_id
+  //         FROM addresses a
+  //         INNER JOIN cities c ON a.city_id = c.id
+  //         INNER JOIN countries co ON c.country_id = co.id
+  //         WHERE c.name ILIKE '%${parsed.normalizedQuery}%'
+  //       `
+  //     }
 
-      return `
-        SELECT a.id, a.street, a.postal_code, a.geom, c.name as city_name, c.id as city_id, co.name as country_name, c.id as city_id
-        FROM addresses a
-        INNER JOIN cities c ON a.city_id = c.id
-        INNER JOIN countries co ON c.country_id = co.id
-        WHERE a.search_vector @@ plainto_tsquery('english', '${query}')
-      `
-    }
-  }
+  //     return `
+  //       SELECT a.id, a.street, a.postal_code, a.geom, c.name as city_name, c.id as city_id, co.name as country_name, c.id as city_id
+  //       FROM addresses a
+  //       INNER JOIN cities c ON a.city_id = c.id
+  //       INNER JOIN countries co ON c.country_id = co.id
+  //       WHERE a.search_vector @@ plainto_tsquery('english', '${query}')
+  //     `
+  //   }
+  // }
 
   private buildAddressFilter1(
     query?: string,
@@ -480,7 +440,8 @@ export class PropertyModel {
         INNER JOIN countries co ON c.country_id = co.id
         WHERE a.search_vector @@ plainto_tsquery('english', '${query}')
       `
-    }
+    } 
+    return ''
   }
 
   private buildAvailabilityFilter (
@@ -571,7 +532,7 @@ export class PropertyModel {
       console.log({pr: newProperty.id})
 
       // Insert images
-      const images = [];
+      const images:number[] = [];
       if (property.images && property.images.length > 0) {
         for (const imageUrl of property.images) {
           const imageResult = await client.query(
@@ -610,7 +571,7 @@ export class PropertyModel {
       await this.invalidatePropertyCache(newProperty.id, newProperty.realtor_id);
 
       return { ...newProperty, images };
-    } catch (error) {
+    } catch (error:any) {
       await client.query("ROLLBACK");
       
       if (error.code === "23505") {
@@ -672,7 +633,7 @@ export class PropertyModel {
   // ============================================
 
   async findByRealtor(
-    realtorId: number,
+    realtorId: string,
     requestedFields: string[] = []
   ): Promise<Property[]> {
     const sortedFields = [...requestedFields].sort();
@@ -682,7 +643,7 @@ export class PropertyModel {
       const cached = (await redisClient.get(cacheKey))?.toString();
       if (cached) {
         console.log("Cache hit for realtor properties:", realtorId);
-        return JSON.parse(cached);
+        // return JSON.parse(cached);
       }
     } catch (error) {
       console.error("Redis get error:", error);
@@ -721,53 +682,139 @@ export class PropertyModel {
 
   // Fixed searchRoomTypes method - replace in your PropertyModel class
 
-  async quickSearch(query: string, latitude: number, longitude: number, radius: number, first = 10) {
-    // const cacheKey = `search:${JSON.stringify(input)}`;
-    try {
-      console.log(query, latitude, longitude, radius)
-      let sqlQuery = this.buildAddressFilter1(query, latitude, longitude, radius)
-      const parsed = this.parseAddressQuery(query)
-      console.log({parsed})
-      let search_type 
-      if(parsed.useCity) {
-        search_type = 'city'
-      } else if (parsed.usePostalCode) {
-        search_type = 'postal_code'
-      } else {
-        search_type = 'text_search'
-      }
+  // async quickSearch(query: string, latitude: number, longitude: number, radius: number, first = 10) {
+  //   // const cacheKey = `search:${JSON.stringify(input)}`;
+  //   try {
+  //     console.log(query, latitude, longitude, radius)
+  //     let sqlQuery = this.buildAddressFilter1(query, latitude, longitude, radius)
+  //     const parsed = this.parseAddressQuery(query)
+  //     console.log({parsed})
+  //     let search_type 
+  //     if(parsed.useCity) {
+  //       search_type = 'city'
+  //     } else if (parsed.usePostalCode) {
+  //       search_type = 'postal_code'
+  //     } else {
+  //       search_type = 'text_search'
+  //     }
   
-      sqlQuery += `LIMIT ${first}`
-      console.log({sqlQuery})
-      console.time('quick')
+  //     sqlQuery += `LIMIT ${first}`
+  //     console.log({sqlQuery})
+  //     console.time('quick')
   
-      const result = await this.pool.query(sqlQuery)
-      const final_map = result.rows.map(row => ({
-        id: row?.id || null,
-        city: {
-          id: row?.city_id,
-          name: row?.city_name
-        },
-        country: {
-          id: row?.country_id,
-          name: row?.country_name
-        },
-        geom: row?.geom,
-        postal_code: row?.postal_code,
-        street: row?.street
-      }))
-      console.log({reS: result.rows})
-      console.timeEnd('quick')
+  //     const result = await this.pool.query(sqlQuery)
+  //     const final_map = result.rows.map(row => ({
+  //       id: row?.id || null,
+  //       city: {
+  //         id: row?.city_id,
+  //         name: row?.city_name
+  //       },
+  //       country: {
+  //         id: row?.country_id,
+  //         name: row?.country_name
+  //       },
+  //       geom: row?.geom,
+  //       postal_code: row?.postal_code,
+  //       street: row?.street
+  //     }))
+  //     console.log({reS: result.rows})
+  //     console.timeEnd('quick')
 
 
-      return {
-        quickSearch: final_map,
-        search_type
-      }
-    } catch (error) {
-      throw error
-    }
-  }
+  //     return {
+  //       quickSearch: final_map,
+  //       search_type
+  //     }
+  //   } catch (error) {
+  //     throw error
+  //   }
+  // }
+  async quickSearch(query: string) {
+  const trimmed = query.trim();
+  const isNumericDominant = /^\d{4,}$/.test(trimmed.replace(/\s/g, ''));
+
+  const [cityResults, postalResults, textResults] = await Promise.all([
+    this.pool.query(
+      `SELECT 'city' AS search_type, c.id AS city_id, c.name AS city_name,
+              co.id AS country_id, co.name AS country_name,
+              NULL AS street, NULL AS postal_code, NULL AS geom,
+              similarity(c.name, $1) AS score
+       FROM cities c
+       JOIN countries co ON c.country_id = co.id
+       WHERE c.name % $1
+       ORDER BY score DESC LIMIT 5`,
+      [trimmed]
+    ),
+
+    isNumericDominant
+      ? this.pool.query(
+          `SELECT 'postal_code' AS search_type, a.id, a.postal_code,
+                  c.id AS city_id, c.name AS city_name,
+                  co.id AS country_id, co.name AS country_name, a.geom
+           FROM addresses a
+           JOIN cities c ON a.city_id = c.id
+           JOIN countries co ON c.country_id = co.id
+           WHERE a.postal_code ILIKE $1 LIMIT 5`,
+          [`%${trimmed}%`]
+        )
+      : Promise.resolve({ rows: [] }),
+
+    // Only search streets if query looks like a street (has 2+ words, or no city matched)
+    !isNumericDominant
+      ? this.pool.query(
+          `SELECT 'street' AS search_type, a.id, a.street, a.postal_code, a.geom,
+                  c.id AS city_id, c.name AS city_name,
+                  co.id AS country_id, co.name AS country_name,
+                  similarity(a.street, $1) AS score
+           FROM addresses a
+           JOIN cities c ON a.city_id = c.id
+           JOIN countries co ON c.country_id = co.id
+           WHERE a.street % $1          -- trigram on the street name directly
+           ORDER BY score DESC LIMIT 5`,
+          [trimmed]
+        )
+      : Promise.resolve({ rows: [] }),
+  ]);
+
+  const STRONG_CITY_SCORE = 0.4;
+  const strongCityHit = cityResults.rows.some(r => r.score >= STRONG_CITY_SCORE);
+
+  // If we have a confident city match, suppress streets entirely —
+  // the user is searching for a place, not an address
+  const streets = strongCityHit ? [] : textResults.rows;
+
+  const merged = [
+    ...cityResults.rows,
+    ...postalResults.rows,
+    ...streets,
+  ];
+  console.log({merged})
+
+  const dominantType =
+    cityResults.rows.length > 0 ? 'city' :
+    postalResults.rows.length > 0 ? 'postal_code' : 'street';
+
+  const quickSearch = merged.map(row => ({
+      id: row.id ?? null,
+      city: { id: row.city_id, name: row.city_name },
+      country: { id: row.country_id, name: row.country_name },
+      geom: row.geom ?? null,
+      postal_code: row.postal_code ?? null,
+      street: row.street ?? null,
+    }))
+    console.log({quickSearch: quickSearch[0]})
+  return {
+    quickSearch: merged.map(row => ({
+      id: row.id ?? null,
+      city: { id: row.city_id, name: row.city_name },
+      country: { id: row.country_id, name: row.country_name },
+      geom: row.geom ?? null,
+      postal_code: row.postal_code ?? null,
+      street: row.street ?? null,
+    })),
+    search_type: dominantType,
+  };
+}
 
   async searchRoomTypes(
     input: SearchRoomsInput,
@@ -826,6 +873,7 @@ export class PropertyModel {
     .map((f) => `${f} AS ${f.replace(".", "_")}`);
   // console.log({pFields, requestedFields})
   const fields = [...rtFields, ...pFields];
+  console.log({pFields})
   // const addressFilter = `
   //   WITH filtered_addresses AS (
   //     ${this.buildAddressFilter(query, latitude, longitude, radius)}
@@ -1031,6 +1079,7 @@ export class PropertyModel {
         updated_at: row?.p_updated_at,
       },
     }));
+    console.log({roomTypes})
 
     const totalCount = 10;
     // const totalCount = parseInt(countResult.rows[0]?.count || "0");
@@ -1045,6 +1094,7 @@ export class PropertyModel {
       pageInfo: { hasNextPage, endCursor },
       totalCount,
     };
+    console.log({result: result.edges[0]})
 
     console.timeEnd('mapping')
     console.time('cache')
@@ -1074,18 +1124,18 @@ export class PropertyModel {
     const cacheKey = `roomType:${id}`;
     console.log({cacheKey})
     try {
-      const cached = (await redisClient.get(cacheKey))?.toString();
-      if (cached) {
-        console.log("Cache hit for room type:", id);
-        return JSON.parse(cached);
-      }
+      // const cached = (await redisClient.get(cacheKey))?.toString();
+      // if (cached) {
+      //   console.log("Cache hit for room type:", id);
+      //   return JSON.parse(cached);
+      // }
     } catch (error) {
       console.error("Redis get error:", error);
     }
 
     const rtFields = this.mapGraphQLFieldsToColumns(requestedFields, "rt");
     const pFields = requestedFields
-      .filter((f) => f.startsWith("p."))
+      .filter((f) => f.startsWith("p.") && f !== 'p.images')
       .map((f) => `${f} AS ${f.replace(".", "_")}`);
 
     const fields = [...rtFields, ...pFields];
@@ -1196,9 +1246,13 @@ export class PropertyModel {
 
     const result = await this.pool.query(query, [ids]);
 
-    if (!result.rows[0]) {
-      return null;
-    }
+    // if (result.rows.length <= 0) {
+    //   return {
+    //     edges: [],
+    //     totalCount: 0,
+    //     pageInfo: {hasNextPage: false, endCursor: ''}
+    //   }
+    // }
 
     const row = result.rows;
     console.log({row})
@@ -1474,7 +1528,7 @@ export class PropertyModel {
              WHERE pi.property_id = $1 AND i.id = ANY($2)`,
             [id, updates.images.remove]
           );
-          const storage_keys = []
+          const storage_keys: string[] = []
           for (const img of imagesToDelete.rows) {
             storage_keys.push(img.storage_key)
           }
@@ -1574,7 +1628,7 @@ export class PropertyModel {
         if (updates[field] !== undefined && updates[field] !== null) {
           updateFields.push(`${field} = $${paramIndex++}`);
           updateValues.push(
-            field === "amenities" ? JSON.stringify(updates[field]) : field === "status" ? updates.status.toLocaleLowerCase() : updates[field]
+            // field === "amenities" ? JSON.stringify(updates[field]) : field === "status" ? updates.status.toLocaleLowerCase() : updates[field]
           );
         }
       }
@@ -1695,7 +1749,7 @@ export class PropertyModel {
       await client.query("COMMIT");
 
       // Clean up Redis
-      await this.invalidatePropertyCache(id, property.realtor_id);
+      await this.invalidatePropertyCache(id, parseInt(property.realtor_id));
 
       // Remove from geo index
       try {

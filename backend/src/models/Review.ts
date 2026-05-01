@@ -1,23 +1,9 @@
 // src/models/Review.ts
 import { Pool } from 'pg';
 import pool from '../config/database.js';
+import { ReviewInput } from '../types/input.js';
+import { Review } from '../types/index.js';
 
-export interface Review {
-  id: number;
-  property_id: number;
-  guest_id: number;
-  rating: number;
-  comment?: string;
-  created_at: string;
-}
-
-export interface ReviewInput {
-  bookingId: number;
-  user_id: number;
-  rating: number;
-  comment?: string;
-  created_at: string;
-}
 
 export class ReviewModel {
   constructor(private pool: Pool) {}

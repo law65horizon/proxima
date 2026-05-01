@@ -95,14 +95,15 @@
 //   },
 // };
 
-import AddressModel, { Address } from "../../models/Address.js";
-import UserModel, { User } from "../../models/User.js";
+import AddressModel from "../../models/Address.js";
+import UserModel from "../../models/User.js";
 import { hashPassword } from "../../services/auth.js";
 import DataLoader from "dataloader";
 import { getRequestedFields } from "../../utils/getyRequestedFields.js";   // Helper to parse requested fields
-
+import { User, Address, Context } from "../../types/index.js";
+import { requireAuth } from "../../middleware/guards.js";
 // DataLoader for users
-export const userLoader = new DataLoader(async (ids: number[]) => {
+export const userLoader = new DataLoader(async (ids: readonly string[]) => {
   const query = `
     SELECT id, name, email, uid, phone, description, created_at, address_id
     FROM users
@@ -112,7 +113,7 @@ export const userLoader = new DataLoader(async (ids: number[]) => {
   return ids.map(id => result.rows.find(row => row.id === id) || null);
 });
 
-export const addressLoader = new DataLoader(async (addressIds: (number | null)[]) => {
+export const addressLoader = new DataLoader(async (addressIds: readonly (number | null)[]) => {
   // console.log({iosiow: "iodieowi"})
   const validIds = addressIds.filter(id => id !== null) as number[];
   if (validIds.length === 0) return addressIds.map(() => null);
@@ -139,7 +140,7 @@ export default {
   Query: {
     getUser: async (_: any, { id }: { id: string }, __: any, info: any) => {
       const requestedFields = getRequestedFields(info);
-      const user = await userLoader.load(parseInt(id));
+      const user = await userLoader.load(id);
       if (!user) return null;
       if (requestedFields.includes('address')) {
         const address = await addressLoader.load(user.address_id);
@@ -170,10 +171,10 @@ export default {
       
       return user;
     },
-    updateUser: async (_: any, { id, input }: { id: string, input: User }, { user }: { user: User }, info: any) => {
-      if (!user || user.id !== parseInt(id)) throw new Error('unauthorized');
+    updateUser: async (_: any, { id, input }: { id: string, input: User }, context: Context, info: any) => {
+      const user = requireAuth(context)
       const requestedFields = getRequestedFields(info);
-      const updatedUser = await UserModel.update(parseInt(id), input);
+      const updatedUser = await UserModel.update(user.id, input);
       if (!updatedUser) return null;
       if (requestedFields.includes('address')) {
         const address = updatedUser.address_id ? await addressLoader.load(updatedUser.address_id) : null;
@@ -181,9 +182,9 @@ export default {
       }
       return updatedUser;
     },
-    deleteUser: async (_: any, { id }: { id: string }, { user }: { user: User }) => {
-      if (!user || user.id !== parseInt(id)) throw new Error('unauthorized');
-      return await UserModel.delete(parseInt(id));
+    deleteUser: async (_: any, { id }: { id: string }, context: Context) => {
+      const user = requireAuth(context)
+      return await UserModel.delete(user.id);
     },
   },
 };

@@ -12,7 +12,7 @@ import pool from './config/database.js';
 import { Context } from './graphql/context.js';
 import { pubsub } from './services/pubsub.js';
 import cors from "cors"
-import { createEmailTransporter } from './utils/emailTransport.js';
+// import { createEmailTransporter } from './utils/emailTransport.js';
 import { error } from 'console';
 import jwt from 'jsonwebtoken';
 // import { authMiddleWare } from './middleware/auth.js';
@@ -108,13 +108,14 @@ const startServer = async () => {
           return {
             req,
             pubsub, 
-            user: (req as any).user
+            user: (req as any).user,
+            auth_msg: (req as any)?.auth_msg
           }
         }
       })
     );
 
-    await new Promise<void>((resolve) => httpServer.listen({ port: 4000 }, resolve));
+    await new Promise<void>((resolve) => httpServer.listen({ port: 4000, host: '0.0.0.0' }, resolve));
     console.log(`🚀 Server ready at http://localhost:4000/`);
   } catch (error) {
     console.error('Error starting server:', error);
@@ -123,7 +124,7 @@ const startServer = async () => {
 
 startServer();
 
-const getDynamicContext = async (ctx, msg, args) => {
+const getDynamicContext = async (ctx:any, msg:any, args:any) => {
   if (ctx.connectionParams.authorization) {
     const token = ctx.connectionParams.authorization.replace('Bearer ', '')
     console.log({token})

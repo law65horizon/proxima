@@ -6,6 +6,7 @@ type User {
   email: String!
   phone: String
   description: String
+  role: String!
   created_at: String!
   address_id: ID
   address: Address
